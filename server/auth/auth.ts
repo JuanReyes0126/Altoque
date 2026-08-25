@@ -20,13 +20,14 @@
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { prisma } from "../database/prisma";
-import { env, isProd, trustedOrigins } from "../config/env";
+import { canonicalOrigin, env, isProd, trustedOrigins } from "../config/env";
 import { resetPasswordEmail, verificationEmail } from "./email";
 
 const e = env();
 
 export const auth = betterAuth({
-  baseURL: e.APP_URL,
+  // Dinámico: APP_URL (prod) → VERCEL_URL (cada Preview) → localhost (dev).
+  baseURL: canonicalOrigin(),
   basePath: "/api/v1/auth",
   secret: e.BETTER_AUTH_SECRET,
   database: prismaAdapter(prisma, { provider: "postgres" }),

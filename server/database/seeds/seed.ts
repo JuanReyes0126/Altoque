@@ -1,7 +1,7 @@
 /**
  * ALTOQUE · Seed idempotente (F1.1)
  *
- * Ejecución:  npx tsx server/database/seeds/seed.ts
+ * Ejecución:  npx tsx --env-file=.env server/database/seeds/seed.ts
  * Requiere:   DATABASE_URL (rama DEV de Neon — jamás Production)
  *
  * Idempotente: todo se inserta con `upsert` sobre IDs estables.
@@ -9,7 +9,6 @@
  * están definidas; la contraseña se hashea con el MISMO mecanismo que
  * Better Auth (scrypt vía better-auth/crypto).
  */
-import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
 import { hashPassword } from "better-auth/crypto";
 

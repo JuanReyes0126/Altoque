@@ -17,8 +17,13 @@ const schema = z.object({
 
   /** Secreto de Better Auth (≥32 chars). SERVER ONLY. */
   BETTER_AUTH_SECRET: z.string().min(32, "BETTER_AUTH_SECRET debe tener ≥32 caracteres"),
-  /** Origen canónico: https://altoque… (sin barra final) */
-  APP_URL: z.string().url().default("http://localhost:3000"),
+  /**
+   * Origen canónico: https://altoque… (sin barra final).
+   * OPCIONAL a propósito: si no se define, se deriva de VERCEL_URL
+   * (cada Preview tiene el suyo — v1.1 §6). Solo se fija explícitamente
+   * en Production con el dominio real.
+   */
+  APP_URL: z.string().url().optional(),
 
   /** Orígenes extra confiables (p. ej. previews), separados por coma */
   EXTRA_TRUSTED_ORIGINS: z.string().optional(),
@@ -56,8 +61,23 @@ export function env(): Env {
 
 export const isProd = () => env().NODE_ENV === "production";
 
+/**
+ * Origen canónico de la aplicación (v1.1 §6 — URLs dinámicas de Preview):
+ *   1. APP_URL explícita (Production con dominio real, o dev local).
+ *   2. VERCEL_URL (Vercel la inyecta en cada deploy: cada Preview tiene
+ *      la suya, p. ej. "altoque-git-feat-x-equipo.vercel.app").
+ *   3. localhost:3000 como último recurso (dev sin Vercel).
+ * Nunca se hardcodea un dominio: quien responde, define su origen.
+ */
+export function canonicalOrigin(): string {
+  const e = env();
+  if (e.APP_URL) return e.APP_URL.replace(/\/$/, "");
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  return "http://localhost:3000";
+}
+
 export function trustedOrigins(): string[] {
   const e = env();
   const extra = (e.EXTRA_TRUSTED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  return [e.APP_URL, ...extra];
+  return [canonicalOrigin(), ...extra];
 }
