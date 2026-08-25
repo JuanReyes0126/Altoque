@@ -1,0 +1,562 @@
+// ════════════════════════════════════════════════════════════════
+// ALTOQUE · Esquema definitivo F1 (docs/f1-technical-architecture-v1.1.md
+// + docs/f1-implementation-addendum.md)
+//
+// CONEXIONES (Addendum §2):
+//   DATABASE_URL          → Neon POOLED (?pgbouncer=true) — runtime
+//   DIRECT_DATABASE_URL   → Neon DIRECT — solo CLI (prisma.config.ts)
+//
+// Las 4 tablas de autenticación (user, session, account, verification)
+// siguen el esquema OFICIAL de Better Auth 1.7.1 — Better Auth es la
+// fuente de verdad; no se altera la semántica de session.token.
+// Los campos propios de Altoque en `user` están declarados con
+// `input: false` en la configuración de Better Auth (server/auth/auth.ts).
+// ════════════════════════════════════════════════════════════════
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────── ENUMS ───────────────────────────
+
+enum UserRole {
+  customer
+  provider
+  admin
+}
+
+enum AccountStatus {
+  active
+  suspended
+  blocked
+}
+
+enum AdminRole {
+  support
+  moderator
+  admin
+  super_admin
+}
+
+enum ProviderVerificationStatus {
+  draft
+  pending_verification
+  verified
+  rejected
+  suspended
+  blocked
+}
+
+enum ProviderDocType {
+  cedula
+  selfie
+  phone_proof
+  certification
+}
+
+enum DocReviewStatus {
+  pending
+  approved
+  rejected
+}
+
+enum RequestWhen {
+  now
+  scheduled
+  quote
+}
+
+enum RequestStatus {
+  searching
+  accepted
+  on_the_way
+  arrived
+  in_progress
+  completed
+  confirmed
+  reviewed
+  cancelled
+  expired
+}
+
+enum DisputeStatus {
+  open
+  resolved_customer
+  resolved_provider
+}
+
+enum ReportStatus {
+  open
+  resolved
+  dismissed
+}
+
+// Financiero: diseño futuro (F5). Sin endpoints ni procesamiento en F1.
+enum PaymentStatus {
+  pending
+  held
+  paid
+  refunded
+}
+
+enum TransactionKind {
+  earning
+  payout
+  adjustment
+}
+
+// ─────────────────── BETTER AUTH (esquema oficial) ───────────────────
+
+model user {
+  id            String    @id @default(cuid())
+  name          String
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // ── Campos propios de Altoque ──
+  // `role` tiene input:false en Better Auth: NUNCA proviene del cliente.
+  role      UserRole      @default(customer)
+  phone     String?
+  status    AccountStatus @default(active)
+  deletedAt DateTime?
+
+  session              session[]
+  account              account[]
+  admin_profile        admin_profile?
+  customer_profile     customer_profile?
+  provider_profile     provider_profile?
+  address              address[]
+  service_request      service_request[]
+  request_status_history request_status_history[]
+  review               review[]
+  report               report[]
+  dispute_opened       dispute[]              @relation("dispute_opener")
+  dispute_resolved     dispute[]              @relation("dispute_resolver")
+  notification         notification[]
+  admin_audit_log      admin_audit_log[]
+  reviewed_documents   provider_document[]   @relation("doc_reviewer")
+  provider_verifications provider_verification_history[] @relation("verification_actor")
+}
+
+model session {
+  id        String   @id @default(cuid())
+  expiresAt DateTime
+  // token: emitido y gestionado por Better Auth. Sin hashing casero (Addendum §1).
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      user     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model account {
+  id                    String    @id @default(cuid())
+  accountId             String
+  providerId            String
+  userId                String
+  user                  user      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?   // hash scrypt gestionado por Better Auth
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+}
+
+model verification {
+  id         String    @id @default(cuid())
+  identifier String    // almacenado hasheado vía verification.storeIdentifier:"hashed" (verificado en BA 1.7.1)
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime? @default(now())
+  updatedAt  DateTime? @updatedAt
+
+  @@index([identifier])
+}
+
+// ─────────────────────────── USUARIOS ───────────────────────────
+
+/// Capacidad administrativa privilegiada. Solo el servidor la crea
+/// (SUPER_ADMIN mediante, auditado). user.role = 'admin' sin fila aquí
+/// no concede nada: la matriz de permisos lee admin_profile.admin_role.
+model admin_profile {
+  user_id    String   @id
+  user       user     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  admin_role AdminRole
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+model customer_profile {
+  user_id            String   @id
+  user               user     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  default_address_id String?  @unique
+  default_address    address? @relation("default_address", fields: [default_address_id], references: [id], onDelete: SetNull)
+  prefs              Json     @default("{}")
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+}
+
+model address {
+  id         String   @id // ULID generado por la aplicación (server/lib/ids.ts)
+  user_id    String
+  user       user     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  label      String
+  line       String
+  zone_id    String
+  zone       zone     @relation(fields: [zone_id], references: [id], onDelete: Restrict)
+  lat        Decimal? @db.Decimal(9, 6)
+  lng        Decimal? @db.Decimal(9, 6)
+  is_default Boolean  @default(false)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  customer_profile_default customer_profile[] @relation("default_address")
+
+  @@index([user_id])
+}
+
+// ─────────────────────────── GEOGRAFÍA / SERVICIOS ───────────────────────────
+
+model zone {
+  id              String   @id // slug estable sembrado ("cerros", "gurabo"…)
+  name            String
+  municipality    String   @default("Santiago de los Caballeros")
+  km_from_center  Decimal? @db.Decimal(6, 2)
+  is_active       Boolean  @default(true)
+  created_at      DateTime @default(now())
+
+  address          address[]
+  provider_zone    provider_zone[]
+  service_request  service_request[]
+}
+
+model category {
+  id         String   @id // slug estable sembrado ("plomeria"…)
+  name       String
+  icon       String
+  group_name String   // "Hogar" | "Técnicos" | …
+  is_active  Boolean  @default(true)
+  sort       Int      @default(0)
+  created_at DateTime @default(now())
+
+  provider_service provider_service[]
+  service_request  service_request[]
+}
+
+// ─────────────────────────── PROVEEDORES ───────────────────────────
+// Modelo de doble capacidad (Addendum §3): la MISMA cuenta puede operar
+// como cliente y como proveedor. La capacidad provider vive aquí,
+// gobernada por verification_status — no por un toggle de rol.
+
+model provider_profile {
+  id                  String                     @id // ULID
+  user_id             String                     @unique
+  user                user                       @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  business_name       String?
+  bio                 String                     @default("")
+  years_exp           Int                        @default(0)
+  avg_eta_min         Int?
+  verification_status ProviderVerificationStatus @default(draft)
+  is_available        Boolean                    @default(false)
+  available_since     DateTime?
+  referral_code       String                     @unique
+  referred_by         String?
+  referred_by_profile provider_profile?          @relation("referrals", fields: [referred_by], references: [id], onDelete: SetNull)
+  referrals           provider_profile[]         @relation("referrals")
+  founder_months_free Int                        @default(3)
+  created_at          DateTime                   @default(now())
+  updated_at          DateTime                   @updatedAt
+
+  provider_service              provider_service[]
+  provider_zone                 provider_zone[]
+  provider_document             provider_document[]
+  provider_verification_history provider_verification_history[]
+  service_request               service_request[]
+  review                        review[]
+  transaction_ledger            transaction_ledger[]
+
+  @@index([verification_status, is_available])
+}
+
+model provider_service {
+  provider_id String
+  provider    provider_profile @relation(fields: [provider_id], references: [id], onDelete: Cascade)
+  category_id String
+  category    category         @relation(fields: [category_id], references: [id], onDelete: Restrict)
+  price_from  Int              // RD$ — precio orientativo "desde"
+  created_at  DateTime         @default(now())
+
+  @@id([provider_id, category_id])
+}
+
+model provider_zone {
+  provider_id String
+  provider    provider_profile @relation(fields: [provider_id], references: [id], onDelete: Cascade)
+  zone_id     String
+  zone        zone             @relation(fields: [zone_id], references: [id], onDelete: Restrict)
+
+  @@id([provider_id, zone_id])
+}
+
+/// Documentos PRIVADOS (Addendum §16: cédula, selfie, certificaciones).
+/// Nunca URL pública permanente: se sirven vía endpoint autorizado.
+model provider_document {
+  id          String          @id // ULID
+  provider_id String
+  provider    provider_profile @relation(fields: [provider_id], references: [id], onDelete: Cascade)
+  type        ProviderDocType
+  blob_key    String          // clave en el store PRIVADO de Vercel Blob
+  file_name   String
+  size_bytes  Int
+  mime        String          // image/jpeg | image/png | application/pdf
+  status      DocReviewStatus @default(pending)
+  reviewed_by String?
+  reviewer    user?           @relation("doc_reviewer", fields: [reviewed_by], references: [id], onDelete: SetNull)
+  reviewed_at DateTime?
+  created_at  DateTime        @default(now())
+
+  @@index([provider_id, status])
+}
+
+/// Append-only. Sin UPDATE/DELETE a nivel de aplicación.
+model provider_verification_history {
+  id          String                     @id // ULID
+  provider_id String
+  provider    provider_profile           @relation(fields: [provider_id], references: [id], onDelete: Cascade)
+  from_status ProviderVerificationStatus
+  to_status   ProviderVerificationStatus
+  reason      String?
+  actor_id    String?
+  actor       user?                      @relation("verification_actor", fields: [actor_id], references: [id], onDelete: SetNull)
+  at          DateTime                   @default(now())
+
+  @@index([provider_id, at])
+}
+
+// ─────────────────────────── SOLICITUDES ───────────────────────────
+
+model request_code_seq {
+  id         Int    @id @default(1)
+  last_value BigInt @default(0)
+}
+
+model service_request {
+  id              String        @id // ULID técnico, no secuencial
+  code            String        @unique // ALT-2026-000001 — humano, NO concede acceso
+  customer_id     String
+  customer        user          @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+  category_id     String
+  category        category      @relation(fields: [category_id], references: [id], onDelete: Restrict)
+  zone_id         String
+  zone            zone          @relation(fields: [zone_id], references: [id], onDelete: Restrict)
+  address_id      String?
+  address         address?      @relation(fields: [address_id], references: [id], onDelete: SetNull)
+  description     String
+  when_type       RequestWhen
+  scheduled_at    DateTime?
+  status          RequestStatus @default(searching)
+  provider_id     String?
+  provider        provider_profile? @relation(fields: [provider_id], references: [id], onDelete: SetNull)
+  eta_min         Int?
+  price_estimate  Int?
+  release_count   Int           @default(0) // rechazos del provider antes de asignación definitiva
+  created_at      DateTime      @default(now())
+  updated_at      DateTime      @updatedAt
+  completed_at    DateTime?
+  confirmed_at    DateTime?
+
+  request_photo        request_photo[]
+  request_status_history request_status_history[]
+  review               review?
+  dispute              dispute[]
+  payment              payment?
+
+  // Bandeja del proveedor (searching por categoría/zona)
+  @@index([status, category_id, zone_id])
+  // Trabajo activo / ingresos del provider
+  @@index([provider_id, status])
+  // Historial del cliente
+  @@index([customer_id, created_at(sort: Desc)])
+  // NOTA: el índice parcial que garantiza "1 provider = 1 trabajo activo"
+  // vive en la migración SQL (no expresable en el schema Prisma):
+  //   CREATE UNIQUE INDEX ... ON service_request (provider_id)
+  //   WHERE provider_id IS NOT NULL
+  //     AND status IN ('accepted','on_the_way','arrived','in_progress');
+}
+
+model request_photo {
+  id         String   @id // ULID
+  request_id String
+  request    service_request @relation(fields: [request_id], references: [id], onDelete: Cascade)
+  blob_key   String    // store privado (visible solo para las partes autorizadas)
+  sort       Int       @default(0)
+  created_at DateTime  @default(now())
+
+  @@index([request_id])
+}
+
+/// Append-only: cada transición de la máquina de estados escribe aquí
+/// DENTRO de la misma transacción que el cambio de estado (Addendum §2).
+model request_status_history {
+  id          String        @id // ULID
+  request_id  String
+  request     service_request @relation(fields: [request_id], references: [id], onDelete: Cascade)
+  from_status RequestStatus?
+  to_status   RequestStatus
+  actor_id    String?
+  actor       user?         @relation(fields: [actor_id], references: [id], onDelete: SetNull)
+  actor_kind  String        // customer | provider | admin | system
+  note        String?
+  at          DateTime      @default(now())
+
+  @@index([request_id, at])
+}
+
+// ─────────────────────────── REPUTACIÓN ───────────────────────────
+
+model review {
+  id             String   @id // ULID
+  request_id     String   @unique // UNIQUE = una sola review por trabajo, garantizado en BD
+  request        service_request @relation(fields: [request_id], references: [id], onDelete: Cascade)
+  reviewer_id    String
+  reviewer       user     @relation(fields: [reviewer_id], references: [id], onDelete: Cascade)
+  provider_id    String
+  provider       provider_profile @relation(fields: [provider_id], references: [id], onDelete: Cascade)
+  rating         Int      // 1–5 (CHECK en la migración SQL)
+  punctuality    Int?     // 1–5
+  quality        Int?     // 1–5
+  communication  Int?     // 1–5
+  comment        String?
+  created_at     DateTime @default(now())
+
+  @@index([provider_id, created_at(sort: Desc)])
+}
+
+model report {
+  id          String       @id // ULID
+  reporter_id String
+  reporter    user         @relation(fields: [reporter_id], references: [id], onDelete: Cascade)
+  target_type String       // user | provider | review | request
+  target_id   String
+  reason      String
+  status      ReportStatus @default(open)
+  created_at  DateTime     @default(now())
+  updated_at  DateTime     @updatedAt
+
+  @@index([status, created_at])
+}
+
+/// La disputa NO altera service_request.status (Addendum §12):
+/// el estado operacional del servicio y el estado de resolución del
+/// conflicto son ciclos separados. Una disputa abierta congela edición
+/// de la review y (F5) pone el pago en `held`.
+model dispute {
+  id          String        @id // ULID
+  request_id  String
+  request     service_request @relation(fields: [request_id], references: [id], onDelete: Cascade)
+  opened_by   String
+  opener      user          @relation("dispute_opener", fields: [opened_by], references: [id], onDelete: Cascade)
+  reason      String
+  status      DisputeStatus @default(open)
+  resolved_by String?
+  resolver    user?         @relation("dispute_resolver", fields: [resolved_by], references: [id], onDelete: SetNull)
+  resolution  String?
+  created_at  DateTime      @default(now())
+  updated_at  DateTime      @updatedAt
+
+  @@index([status, created_at])
+}
+
+// ─────────────────────────── SISTEMA ───────────────────────────
+
+model notification {
+  id         String    @id // ULID
+  user_id    String
+  user       user      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  kind       String    // request_accepted | pro_enroute | request_completed | …
+  title      String
+  body       String
+  meta       Json?
+  read_at    DateTime?
+  created_at DateTime  @default(now())
+
+  @@index([user_id, read_at, created_at(sort: Desc)])
+}
+
+/// Append-only. Toda operación sensible de administración pasa por
+/// server/lib/audit.ts. actor_name se conserva como snapshot para que
+/// la auditoría sobreviva la eliminación de la cuenta del actor.
+model admin_audit_log {
+  id          String   @id // ULID
+  actor_id    String?
+  actor       user?    @relation(fields: [actor_id], references: [id], onDelete: SetNull)
+  actor_name  String
+  actor_admin_role String?
+  action      String   // PROVIDER_APPROVED | USER_SUSPENDED | ADMIN_ROLE_CHANGED | …
+  entity_type String?
+  entity_id   String?
+  metadata    Json?
+  ip          String?
+  user_agent  String?
+  at          DateTime @default(now())
+
+  @@index([action, at])
+  @@index([actor_id, at])
+}
+
+/// Rate limiting a nivel de aplicación (Addendum §14): ventana fija
+/// por (bucket, sujeto). Sin Redis por ahora.
+model rate_limit {
+  bucket       String
+  subject      String
+  count        Int
+  window_start DateTime @db.Timestamptz()
+
+  @@id([bucket, subject])
+}
+
+// ─────────────────────────── FINANCIERO (F5) ───────────────────────────
+// Tablas de diseño futuro. F1 NO expone endpoints ni procesa pagos.
+
+model payment {
+  id         String        @id // ULID
+  request_id String        @unique
+  request    service_request @relation(fields: [request_id], references: [id], onDelete: Cascade)
+  amount     Decimal       @db.Decimal(12, 2)
+  currency   String        @default("DOP")
+  method     String?
+  status     PaymentStatus @default(pending)
+  created_at DateTime      @default(now())
+  updated_at DateTime      @updatedAt
+}
+
+model transaction_ledger {
+  id          String          @id // ULID
+  provider_id String
+  provider    provider_profile @relation(fields: [provider_id], references: [id], onDelete: Cascade)
+  kind        TransactionKind
+  amount      Decimal         @db.Decimal(12, 2)
+  currency    String          @default("DOP")
+  note        String?
+  created_at  DateTime        @default(now())
+
+  @@index([provider_id, created_at(sort: Desc)])
+}
