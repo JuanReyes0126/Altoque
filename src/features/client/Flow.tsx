@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Icon } from "../../components/icons";
-import { AvailDot, Face, FadeUp, JobPhoto, MapCard, ProListItem, Radar, RowHead, Stars, Verif, useFakeLoad } from "../bits";
+import { AvailDot, Face, FadeUp, JobPhoto, MapCard, ProListItem, Radar, RowHead, Stars, Verif, useFakeLoad } from "../../components/ui/kit";
 import {
   CATS, JOB_IMGS, PROBLEMS, ZONES, advanceJob, catById, createJob, fmt, proById, prosByCat, rateJob,
   setRole, signOut, toggleFav, useApp, zoneById, type Tab, type View,
-} from "../store";
+} from "../../lib/state";
+import { PATHS } from "../../lib/router";
 
 /* ════════════════ REQUEST WIZARD ════════════════ */
 export function RequestWizard({ catId: initCat, proId, go }: { catId?: string; proId?: string; go: (v: View) => void }) {
@@ -302,7 +304,7 @@ function Timeline({ status }: { status: string }) {
   );
 }
 
-export function TrackingView({ jobId, go, jump }: { jobId: string; go: (v: View) => void; jump: (t: "jobs") => void }) {
+export function TrackingView({ jobId, go, jump }: { jobId: string; go: (v: View) => void; jump: (t: Tab) => void }) {
   const s = useApp();
   const job = s.jobs.find((j) => j.id === jobId);
   const [rating, setRating] = useState(0);
@@ -603,6 +605,7 @@ export function FavoritesTab({ go }: { go: (v: View) => void }) {
 /* ════════════════ PERFIL (tab) ════════════════ */
 export function MeTab({ go, jump }: { go: (v: View) => void; jump: (t: Tab) => void }) {
   const s = useApp();
+  const nav = useNavigate();
   const doneCount = s.jobs.filter((j) => j.status === "done").length;
   const myName = s.session?.name ?? "María Peralta";
   return (
@@ -632,7 +635,7 @@ export function MeTab({ go, jump }: { go: (v: View) => void; jump: (t: Tab) => v
         ))}
       </section>
 
-      <button onClick={() => setRole("pro")} className="w-full card card-h mt-4 p-5 flex items-center gap-4 text-left border-pine/30">
+      <button onClick={() => { setRole("provider"); nav(PATHS.pro); }} className="w-full card card-h mt-4 p-5 flex items-center gap-4 text-left border-pine/30">
         <span className="w-11 h-11 rounded-xl bg-pine text-white grid place-items-center shrink-0"><Icon name="wrench" className="w-5.5 h-5.5" strokeWidth={1.8} /></span>
         <span className="flex-1">
           <span className="block font-disp font-bold text-[0.95rem] text-ink">¿Eres profesional?</span>
@@ -641,7 +644,7 @@ export function MeTab({ go, jump }: { go: (v: View) => void; jump: (t: Tab) => v
         <Icon name="arrow" className="w-4.5 h-4.5 text-pine shrink-0" strokeWidth={2.2} />
       </button>
 
-      <button onClick={signOut} className="w-full card card-h mt-4 p-5 flex items-center gap-4 text-left border-cor/30">
+      <button onClick={() => { signOut(); nav(PATHS.home); }} className="w-full card card-h mt-4 p-5 flex items-center gap-4 text-left border-cor/30">
         <span className="w-11 h-11 rounded-xl bg-corsoft text-cor grid place-items-center shrink-0"><Icon name="logout" className="w-5 h-5" strokeWidth={1.9} /></span>
         <span className="flex-1">
           <span className="block font-disp font-bold text-[0.95rem] text-ink">Cerrar sesión</span>

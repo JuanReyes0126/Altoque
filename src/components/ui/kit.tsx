@@ -1,6 +1,11 @@
+/* ════════════════════════════════════════════════════════════════
+   ALTOQUE · Kit de UI (src/components/ui)
+   Piezas visuales compartidas por landing, cliente, proveedor y
+   (F4) admin. El estilo vive en los tokens de src/index.css.
+   ════════════════════════════════════════════════════════════════ */
 import { useEffect, useState, type ReactNode } from "react";
-import { Icon } from "../components/icons";
-import { catById, faceUrl, jobUrl, quadPos, type Pro } from "./store";
+import { Icon } from "../icons";
+import { catById, faceUrl, jobUrl, quadPos, type Pro } from "../../lib/state";
 
 /* ── reduced motion ── */
 export function useReducedMotion() {

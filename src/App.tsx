@@ -1,11 +1,30 @@
+/* ════════════════════════════════════════════════════════════════
+   ALTOQUE · Composición raíz
+   Enrutamiento (F0): HashRouter — garantiza que cualquier ruta
+   funcione al refrescar en CUALQUIER hosting estático. En Vercel
+   (F5) se cambia a BrowserRouter (los rewrites ya existen en
+   vercel.json); es un cambio de una línea aquí.
+   ════════════════════════════════════════════════════════════════ */
 import { useEffect, useState, type ReactNode } from "react";
+import { HashRouter, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { Icon } from "./components/icons";
-import { ProApp } from "./app/pro/ProApp";
-import { Landing } from "./app/landing/Landing";
-import { ClientHome, ExploreView, ResultsView } from "./app/client/Home";
-import { ProProfile } from "./app/client/Profile";
-import { FavoritesTab, MeTab, RequestWizard, RequestsTab, TrackingView } from "./app/client/Flow";
-import { takeIntent, useApp, type Tab, type View } from "./app/store";
+import { useApp, type Tab, type View } from "./lib/state";
+import { PATHS, RequireRole, roleHome, tabPath, viewToPath } from "./lib/router";
+
+import { Landing } from "./features/landing/Landing";
+import { ProviderOnboarding } from "./features/landing/Provider";
+import { ClientHome, ExploreView, ResultsView } from "./features/client/Home";
+import { ProProfile } from "./features/client/Profile";
+import { FavoritesTab, MeTab, RequestWizard, RequestsTab, TrackingView } from "./features/client/Flow";
+import { ProApp } from "./features/provider/ProApp";
+import { AdminHome } from "./features/admin/AdminHome";
+
+/* ── "/" público: sin sesión → landing · con sesión → home del rol ── */
+function PublicHome() {
+  const { session } = useApp();
+  if (session) return <Navigate to={roleHome(session.role)} replace />;
+  return <Landing />;
+}
 
 const TAB_META: { k: Tab; icon: "home" | "search" | "clip" | "heart" | "user"; l: string }[] = [
   { k: "home", icon: "home", l: "Inicio" },
@@ -15,49 +34,47 @@ const TAB_META: { k: Tab; icon: "home" | "search" | "clip" | "heart" | "user"; l
   { k: "me", icon: "user", l: "Perfil" },
 ];
 
-function ClientApp() {
+/* ── shell del cliente: la URL manda, la UI solo representa ── */
+function ClientShell() {
   const s = useApp();
-  const [tab, setTab] = useState<Tab>("home");
-  const [stack, setStack] = useState<View[]>(() => {
-    const i = takeIntent();
-    return i ? [i] : [];
-  });
+  const nav = useNavigate();
+  const loc = useLocation();
 
-  const go = (v: View) => setStack((st) => [...st, v]);
-  const back = () => setStack((st) => st.slice(0, -1));
-  const jump = (t: Tab) => { setTab(t); setStack([]); };
-  const goSmart = (v: View) => {
-    if (v.t === "home" && stack.length > 0) back();
-    else go(v);
-  };
+  const go = (v: View) => nav(viewToPath(v));
+  const jump = (t: Tab) => nav(tabPath(t));
 
-  useEffect(() => { window.scrollTo({ top: 0 }); }, [tab, stack.length]);
+  useEffect(() => { window.scrollTo({ top: 0 }); }, [loc.pathname, loc.search]);
 
-  const top = stack[stack.length - 1];
-  const viewKey = stack.map((v) => JSON.stringify(v)).join("|") || tab;
+  const seg = loc.pathname.split("/").filter(Boolean); // ["app", …]
+  const sp = new URLSearchParams(loc.search);
+
+  let view: ReactNode;
+  let activeTab: Tab | null = null;
+
+  if (loc.pathname === PATHS.app) { activeTab = "home"; view = <ClientHome go={go} />; }
+  else if (loc.pathname === `${PATHS.app}/explorar`) { activeTab = "explore"; view = <ExploreView go={go} />; }
+  else if (loc.pathname === `${PATHS.app}/solicitudes`) { activeTab = "jobs"; view = <RequestsTab go={go} />; }
+  else if (loc.pathname === `${PATHS.app}/favoritos`) { activeTab = "favs"; view = <FavoritesTab go={go} />; }
+  else if (loc.pathname === `${PATHS.app}/perfil`) { activeTab = "me"; view = <MeTab go={go} jump={jump} />; }
+  else if (seg[1] === "servicios" && seg[2]) view = <ResultsView key={seg[2]} catId={seg[2]} go={go} />;
+  else if (seg[1] === "profesional" && seg[2]) view = <ProProfile key={seg[2]} id={seg[2]} go={go} />;
+  else if (loc.pathname === `${PATHS.app}/solicitar`)
+    view = <RequestWizard key={loc.search} catId={sp.get("cat") ?? undefined} proId={sp.get("pro") ?? undefined} go={go} />;
+  else if (seg[1] === "solicitud" && seg[2]) view = <TrackingView key={seg[2]} jobId={seg[2]} go={go} jump={jump} />;
+  else view = <Navigate to={PATHS.app} replace />;
+
   const activeCount = s.jobs.filter((j) => j.status !== "done" || !j.rating).length;
-
-  let body: ReactNode;
-  if (top?.t === "results") body = <ResultsView key={viewKey} catId={top.catId} go={goSmart} />;
-  else if (top?.t === "pro") body = <ProProfile key={viewKey} id={top.id} go={goSmart} />;
-  else if (top?.t === "request") body = <RequestWizard key={viewKey} catId={top.catId} proId={top.proId} go={goSmart} />;
-  else if (top?.t === "track") body = <TrackingView key={viewKey} jobId={top.jobId} go={goSmart} jump={jump} />;
-  else if (tab === "explore") body = <ExploreView go={goSmart} />;
-  else if (tab === "jobs") body = <RequestsTab go={goSmart} />;
-  else if (tab === "favs") body = <FavoritesTab go={goSmart} />;
-  else if (tab === "me") body = <MeTab go={goSmart} jump={jump} />;
-  else body = <ClientHome go={goSmart} />;
 
   return (
     <div className="min-h-dvh">
-      <div className="pb-24">{body}</div>
+      <div className="pb-24">{view}</div>
 
       {/* bottom navigation */}
       <nav className="fixed bottom-0 inset-x-0 z-50">
         <div className="mx-auto max-w-md lg:max-w-xl px-4 pb-[max(0.8rem,env(safe-area-inset-bottom))]">
           <div className="rounded-[1.6rem] bg-card/95 backdrop-blur border border-line2 shadow-lift grid grid-cols-5 h-[4.2rem]">
             {TAB_META.map((t) => {
-              const active = tab === t.k && stack.length === 0;
+              const active = activeTab === t.k;
               return (
                 <button
                   key={t.k}
@@ -105,11 +122,26 @@ function Toast() {
 }
 
 export default function App() {
-  const { role, session } = useApp();
-
   return (
     <div className="p-root min-h-dvh">
-      {!session ? <Landing /> : role === "pro" ? <ProApp /> : <ClientApp />}
+      <HashRouter>
+        <Routes>
+          {/* público */}
+          <Route path="/" element={<PublicHome />} />
+          <Route path="/proveedores" element={<ProviderOnboarding />} />
+
+          {/* cliente */}
+          <Route path="/app/*" element={<RequireRole roles={["customer"]}><ClientShell /></RequireRole>} />
+
+          {/* proveedor */}
+          <Route path="/pro" element={<RequireRole roles={["provider"]}><ProApp /></RequireRole>} />
+
+          {/* admin (F4) */}
+          <Route path="/admin" element={<RequireRole roles={["admin"]}><AdminHome /></RequireRole>} />
+
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </HashRouter>
       <Toast />
     </div>
   );

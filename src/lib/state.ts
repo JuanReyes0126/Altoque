@@ -1,46 +1,15 @@
+/* ════════════════════════════════════════════════════════════════
+   ALTOQUE · Estado + datos (src/lib/state)
+   F0: fuente de datos en memoria (mock) + simulación de flujos.
+   F1+: la fuente única de verdad pasa a PostgreSQL vía /server;
+   este módulo queda como hidratación/estado local de la UI.
+   Los tipos viven en src/types (espejo del esquema de BD).
+   ════════════════════════════════════════════════════════════════ */
 import { useSyncExternalStore } from "react";
-
-/* ─────────────────────────── tipos ─────────────────────────── */
-export type Role = "client" | "pro";
-export type Tab = "home" | "explore" | "jobs" | "favs" | "me";
-export type View =
-  | { t: "home" } | { t: "explore" } | { t: "results"; catId: string }
-  | { t: "pro"; id: string } | { t: "request"; catId?: string; proId?: string }
-  | { t: "track"; jobId: string };
-export type When = "now" | "later" | "quote";
-export type JobStatus = "searching" | "accepted" | "enroute" | "arrived" | "started" | "done" | "quoted";
-
-export interface Zone { id: string; name: string; km: number }
-export interface Cat { id: string; name: string; icon: string; group: string; base: number }
-export interface Review { name: string; rating: number; text: string; date: string; ago: string }
-export interface Pro {
-  id: string; name: string; cats: string[]; tagline: string; rating: number; reviews: number; jobs: number;
-  km: number; eta: number; available: boolean; price: number; years: number; respMin: number;
-  face: { f: number; q: number }; tint: string; bio: string; zones: string[]; portfolio: number[];
-  verified: { id: boolean; phone: boolean; pro: boolean }; reviewsList: Review[]; founder?: boolean;
-}
-export interface Job {
-  id: string; catId: string; problem: string; photos: number[]; when: When; zoneId: string; note: string;
-  proId?: string; status: JobStatus; etaMin?: number; etaLeft?: number; scheduledFor?: string;
-  rating?: number; reviewText?: string; createdAt: number; manual?: boolean;
-}
-export interface Incoming {
-  id: string; jobId?: string; client: string; clientRating: number; catId: string; zoneId: string; km: number;
-  problem: string; photos: number[]; expiresIn: number; price: number;
-}
-export interface ProJob {
-  id: string; jobId?: string; client: string; clientRating: number; catId: string; zoneId: string; km: number;
-  problem: string; photos: number[]; status: JobStatus; etaMin: number; price: number;
-}
-
-export interface Session { name: string; kind: "client" | "pro" }
-
-export interface State {
-  role: Role; zoneId: string; favorites: string[]; jobs: Job[]; inbox: Incoming[];
-  proActive: ProJob | null; proAvailable: boolean; toastMsg: string | null; toastId: number;
-  proStats: { today: number; earnings: number; week: number[]; acceptRate: number };
-  session: Session | null;
-}
+import type {
+  Cat, Incoming, Job, JobStatus, Pro, ProJob, Review, Role, Session, State, View, When, Zone,
+} from "../types";
+export type * from "../types";
 
 /* ─────────────────────────── datos ─────────────────────────── */
 export const CARLOS_ID = "p1";
@@ -321,15 +290,28 @@ function loadSession(): Session | null {
     const raw = localStorage.getItem("altoque_session");
     if (!raw) return null;
     const p = JSON.parse(raw);
-    return p && typeof p.name === "string" && (p.kind === "client" || p.kind === "pro") ? p : null;
+    if (!p || typeof p.name !== "string") return null;
+    // compat con sesiones antiguas ({name, kind}) y nuevas ({name, role})
+    const role: Role | null =
+      p.role === "customer" || p.role === "provider" || p.role === "admin" ? p.role
+      : p.kind === "pro" ? "provider"
+      : p.kind === "client" ? "customer"
+      : null;
+    return role ? { name: p.name, role } : null;
   } catch {
     return null;
   }
 }
+function persistSession(session: Session | null) {
+  try {
+    if (session) localStorage.setItem("altoque_session", JSON.stringify(session));
+    else localStorage.removeItem("altoque_session");
+  } catch { /* demo */ }
+}
 const persisted = loadSession();
 
 let state: State = {
-  role: persisted?.kind === "pro" ? "pro" : "client", zoneId: "cerros", favorites: ["p1", "p3", "p5"], jobs: [], inbox: [],
+  role: persisted?.role ?? "customer", zoneId: "cerros", favorites: ["p1", "p3", "p5"], jobs: [], inbox: [],
   proActive: null, proAvailable: true, toastMsg: null, toastId: 0,
   proStats: { today: 4, earnings: 6350, week: [4200, 5800, 3900, 7200, 6350, 0, 0], acceptRate: 96 },
   session: persisted,
@@ -342,7 +324,11 @@ export const subscribe = (l: () => void) => { listeners.add(l); return () => { l
 export function useApp(): State { return useSyncExternalStore(subscribe, getState); }
 
 export const toast = (msg: string) => set({ toastMsg: msg, toastId: state.toastId + 1 });
-export const setRole = (role: Role) => set({ role });
+export const setRole = (role: Role) => {
+  const session = state.session ? { ...state.session, role } : state.session;
+  persistSession(session);
+  set({ role, session });
+};
 export const setZone = (zoneId: string) => set({ zoneId });
 export const toggleFav = (id: string) =>
   set({ favorites: state.favorites.includes(id) ? state.favorites.filter((f) => f !== id) : [...state.favorites, id] });
@@ -351,16 +337,16 @@ export const setProAvailable = (v: boolean) => {
   if (v) setTimeout(() => { if (state.proAvailable) toast("Estás visible para nuevas solicitudes"); }, 300);
 };
 
-/* ── sesión (mock) y navegación desde la landing ── */
-export function signIn(name: string, kind: "client" | "pro") {
-  const session: Session = { name: name.trim() || "María Peralta", kind };
-  try { localStorage.setItem("altoque_session", JSON.stringify(session)); } catch { /* demo */ }
-  set({ session, role: kind });
-  toast(kind === "pro" ? "Bienvenido a tu panel profesional" : `Hola, ${session.name.split(" ")[0]} 👋`);
+/* ── sesión (mock — en F1 la reemplaza auth real del /server) ── */
+export function signIn(name: string, role: Role) {
+  const session: Session = { name: name.trim() || "María Peralta", role };
+  persistSession(session);
+  set({ session, role });
+  toast(role === "provider" ? "Bienvenido a tu panel profesional" : `Hola, ${session.name.split(" ")[0]} 👋`);
 }
 export function signOut() {
-  try { localStorage.removeItem("altoque_session"); } catch { /* demo */ }
-  set({ session: null, role: "client" });
+  persistSession(null);
+  set({ session: null, role: "customer" });
 }
 
 let pendingIntent: View | null = null;

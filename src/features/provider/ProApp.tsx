@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Icon } from "../../components/icons";
-import { Face, FadeUp, JobPhoto, MapCard, Stars, Toggle, useCountdown } from "../bits";
+import { Face, FadeUp, JobPhoto, MapCard, Stars, Toggle, useCountdown } from "../../components/ui/kit";
 import {
-  acceptIncoming, advanceProJob, catById, dismissIncoming, fmt, getState, jobUrl, proById, setProAvailable,
+  acceptIncoming, advanceProJob, catById, dismissIncoming, fmt, getState, proById, setProAvailable,
   setRole, signOut, spawnInbox, tickInbox, useApp, zoneById, CARLOS_ID,
-} from "../store";
+} from "../../lib/state";
+import { PATHS } from "../../lib/router";
 
 type ProTab = "home" | "activity" | "me";
 const ETAS = [10, 15, 20, 30, 45, 60];
@@ -23,7 +25,7 @@ export function ProApp() {
     const t = setInterval(tickInbox, 1000);
     const sp = setInterval(() => {
       const st = getState();
-      if (st.role === "pro" && st.proAvailable && !st.proActive && st.inbox.filter((i) => !i.jobId).length < 2) spawnInbox();
+      if (st.role === "provider" && st.proAvailable && !st.proActive && st.inbox.filter((i) => !i.jobId).length < 2) spawnInbox();
     }, 11000);
     return () => { clearTimeout(boot); clearInterval(t); clearInterval(sp); };
   }, []);
@@ -36,7 +38,7 @@ export function ProApp() {
         {/* header */}
         <header className="pt-6 flex items-center gap-3">
           <div className="min-w-0 flex-1">
-            <p className="text-[0.62rem] font-extrabold uppercase tracking-[0.18em] text-nmut">Modo profesional</p>
+            <p className="text-[0.62rem] font-extrabold uppercase tracking-[0.18em] text-nmut">Altoque Pro</p>
             <h1 className="font-disp font-bold text-[1.35rem] leading-tight truncate">{s.session?.name ?? me.name}</h1>
           </div>
           <div className="flex items-center gap-2">
@@ -226,7 +228,6 @@ function ActiveJob() {
     { k: "done", l: "Completado", ic: "check" },
   ];
   const idx = steps.findIndex((x) => x.k === a.status);
-  const next = steps[idx + 1];
   const actionLabel = a.status === "enroute" ? "He llegado" : a.status === "arrived" ? "Iniciar servicio" : "Completar servicio";
 
   return (
@@ -344,13 +345,14 @@ function Activity() {
 /* ── me tab ── */
 function ProMe() {
   const s = useApp();
+  const nav = useNavigate();
   const me = proById(CARLOS_ID);
   return (
     <div className="mt-7 space-y-5">
       <div className="ncard p-5 flex items-center gap-4">
         <Face face={me.face} name={me.name} size="w-16 h-16" />
         <div>
-          <p className="font-disp font-bold text-[1.1rem] text-ntxt">{me.name}</p>
+          <p className="font-disp font-bold text-[1.1rem] text-ntxt">{s.session?.name ?? me.name}</p>
           <p className="text-[0.76rem] text-nmut font-semibold mt-0.5">{me.tagline}</p>
           <p className="text-[0.72rem] font-bold text-namber mt-1 inline-flex items-center gap-1"><span>★</span>{me.rating.toFixed(1)} · {me.jobs} trabajos</p>
         </div>
@@ -381,13 +383,22 @@ function ProMe() {
         ))}
       </div>
 
-      <button onClick={() => setRole("client")} className="w-full ncard card-h p-5 flex items-center gap-4 text-left">
+      <button onClick={() => { setRole("customer"); nav(PATHS.app); }} className="w-full ncard card-h p-5 flex items-center gap-4 text-left">
         <span className="w-11 h-11 rounded-xl bg-pine text-white grid place-items-center shrink-0"><Icon name="user" className="w-5.5 h-5.5" strokeWidth={1.8} /></span>
         <span className="flex-1">
           <span className="block font-disp font-bold text-[0.95rem] text-ntxt">Volver al modo cliente</span>
           <span className="block text-[0.74rem] text-nmut font-semibold">Ver la app como la ve un cliente</span>
         </span>
         <Icon name="arrow" className="w-4.5 h-4.5 text-namber shrink-0" strokeWidth={2.2} />
+      </button>
+
+      <button onClick={() => { signOut(); nav(PATHS.home); }} className="w-full ncard card-h p-5 flex items-center gap-4 text-left border-cor/40">
+        <span className="w-11 h-11 rounded-xl bg-[#3a1f1a] text-[#ff8a70] grid place-items-center shrink-0"><Icon name="logout" className="w-5 h-5" strokeWidth={1.9} /></span>
+        <span className="flex-1">
+          <span className="block font-disp font-bold text-[0.95rem] text-ntxt">Cerrar sesión</span>
+          <span className="block text-[0.74rem] text-nmut font-semibold">Volver a la página de inicio de Altoque</span>
+        </span>
+        <Icon name="arrow" className="w-4.5 h-4.5 text-[#ff8a70] shrink-0" strokeWidth={2.2} />
       </button>
 
       <p className="text-center text-[0.64rem] text-nmut font-semibold pt-2">

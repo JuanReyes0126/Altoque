@@ -1,10 +1,11 @@
 import { useState, type FormEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import { Icon } from "../../components/icons";
-import { AvailDot, Face, FadeUp, MapCard, Sheet, Stars, Toggle, Verif } from "../bits";
+import { AvailDot, Face, FadeUp, MapCard, Sheet, Stars, Toggle, Verif } from "../../components/ui/kit";
 import {
   CATS, PROS, TICKER, ZONES, catById, fmt, prosByCat, searchAll, setIntent, signIn, useApp, zoneById, type View,
-} from "../store";
-import { ProviderOnboarding } from "./Provider";
+} from "../../lib/state";
+import { PATHS, viewToPath } from "../../lib/router";
 
 /* ════════════════ helpers ════════════════ */
 const LAND_CATS = [
@@ -27,17 +28,13 @@ type AuthState = { mode: "login" | "signup"; intent: View | null } | null;
 
 /* ════════════════ LANDING ════════════════ */
 export function Landing() {
-  const [screen, setScreen] = useState<"home" | "provider">("home");
+  const nav = useNavigate();
   const [auth, setAuth] = useState<AuthState>(null);
   const [menu, setMenu] = useState(false);
   const [zone, setZone] = useState("cerros");
 
   const openAuth = (mode: "login" | "signup", intent: View | null) => setAuth({ mode, intent });
-  const goProvider = () => { setScreen("provider"); window.scrollTo({ top: 0 }); };
-
-  if (screen === "provider") {
-    return <ProviderOnboarding onBack={() => { setScreen("home"); window.scrollTo({ top: 0 }); }} />;
-  }
+  const goProvider = () => nav(PATHS.providerLanding);
 
   const featured = [...PROS].filter((p) => p.available).sort((a, b) => b.rating - a.rating || a.km - b.km).slice(0, 6);
   const z = zoneById(zone);
@@ -484,7 +481,7 @@ function HeroCollage({ onRequest }: { onRequest: () => void }) {
       </div>
 
       {/* pro card */}
-      <div className="absolute left-0 top-0 w-[17rem] card rounded-3xl p-4.5 p-5 shadow-lift animate-floaty">
+      <div className="absolute left-0 top-0 w-[17rem] card rounded-3xl p-5 shadow-lift animate-floaty">
         <div className="flex items-center gap-3">
           <Face face={carlos.face} name={carlos.name} size="w-13 h-13" />
           <div className="min-w-0">
@@ -535,7 +532,7 @@ function MobileHeroCard({ onRequest }: { onRequest: () => void }) {
           <Icon name="clock" className="w-3.5 h-3.5" strokeWidth={2.2} /> Llega en ~{carlos.eta} min
         </span>
       </div>
-      <div className="p-4.5 p-5 flex items-center gap-3.5">
+      <div className="p-5 flex items-center gap-3.5">
         <Face face={carlos.face} name={carlos.name} size="w-12 h-12" />
         <div className="min-w-0 flex-1">
           <p className="font-disp font-bold text-[0.95rem] truncate">{carlos.name}</p>
@@ -568,7 +565,7 @@ function LandingProCard({ proId, onRequest }: { proId: string; onRequest: () => 
         </span>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 mt-4.5 mt-5">
+      <div className="grid grid-cols-3 gap-2 mt-5">
         <span className="rounded-xl bg-tint px-2 py-2 text-center">
           <Icon name={c.icon as never} className="w-4 h-4 mx-auto text-pine" strokeWidth={2} />
           <span className="block text-[0.62rem] font-extrabold text-mut mt-1 truncate px-0.5">{c.name}</span>
@@ -583,7 +580,7 @@ function LandingProCard({ proId, onRequest }: { proId: string; onRequest: () => 
         </span>
       </div>
 
-      <div className="flex items-center justify-between mt-auto pt-4.5 pt-5 border-t border-line2 mt-5">
+      <div className="flex items-center justify-between border-t border-line2 pt-5 mt-auto">
         <p className="text-[0.74rem] font-bold text-soft">
           Desde <span className="text-ink font-disp text-[0.95rem] font-bold">{fmt(p.price)}</span>
         </p>
@@ -656,6 +653,7 @@ function ProviderMock() {
 
 /* ════════════════ auth sheet ════════════════ */
 function AuthSheet({ auth, onClose }: { auth: AuthState; onClose: () => void }) {
+  const nav = useNavigate();
   const [mode, setMode] = useState<"login" | "signup">("signup");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -669,10 +667,11 @@ function AuthSheet({ auth, onClose }: { auth: AuthState; onClose: () => void }) 
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (auth?.intent) setIntent(auth.intent);
-    signIn(mode === "signup" ? name || "María Peralta" : name || session?.name || "María Peralta", "client");
+    const intent = auth?.intent ?? null;
+    signIn(mode === "signup" ? name || "María Peralta" : name || session?.name || "María Peralta", "customer");
     setName(""); setPhone(""); setPass("");
     onClose();
+    nav(intent ? viewToPath(intent) : PATHS.app);
   };
 
   return (

@@ -1,12 +1,15 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Icon } from "../../components/icons";
-import { FadeUp, Toggle } from "../bits";
-import { CATS, ZONES, signIn } from "../store";
+import { FadeUp, Toggle } from "../../components/ui/kit";
+import { CATS, ZONES, setProAvailable, signIn } from "../../lib/state";
+import { PATHS } from "../../lib/router";
 
 const STEPS = ["Tu cuenta", "Tus servicios", "Tu zona", "Disponibilidad"];
 const POPULAR_CATS = ["plomeria", "electricidad", "aire", "cerrajeria", "limpieza", "mecanica", "pintura", "ebanisteria", "camaras", "wifi", "grua", "fotografia"];
 
-export function ProviderOnboarding({ onBack }: { onBack: () => void }) {
+export function ProviderOnboarding() {
+  const nav = useNavigate();
   const [step, setStep] = useState(0);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -26,7 +29,9 @@ export function ProviderOnboarding({ onBack }: { onBack: () => void }) {
 
   const next = () => {
     if (step < 3) { setStep(step + 1); window.scrollTo({ top: 0, behavior: "smooth" }); return; }
-    signIn(name, "pro");
+    signIn(name, "provider");
+    setProAvailable(available);
+    nav(PATHS.pro);
   };
 
   return (
@@ -34,7 +39,7 @@ export function ProviderOnboarding({ onBack }: { onBack: () => void }) {
       {/* header */}
       <header className="sticky top-0 z-40 bg-paper/90 backdrop-blur-md border-b border-line2">
         <div className="max-w-2xl mx-auto px-5 py-3.5 flex items-center gap-4">
-          <button onClick={onBack} className="w-10 h-10 grid place-items-center rounded-xl border border-line bg-card hover:border-pine transition-colors" aria-label="Volver al inicio">
+          <button onClick={() => nav(PATHS.home)} className="w-10 h-10 grid place-items-center rounded-xl border border-line bg-card hover:border-pine transition-colors" aria-label="Volver al inicio">
             <Icon name="chevl" className="w-4.5 h-4.5" strokeWidth={2.4} />
           </button>
           <div className="flex-1">

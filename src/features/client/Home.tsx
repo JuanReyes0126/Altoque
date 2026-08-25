@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Icon } from "../../components/icons";
 import {
   Carousel, Face, FadeUp, ProCard, ProListItem, RowHead, Sheet, SkelCards, SkelList, useFakeLoad,
-} from "../bits";
+} from "../../components/ui/kit";
 import {
   CATS, GROUPS, PROS, ZONES, catById, prosByCat, searchAll, setRole, setZone, useApp, zoneById, type View,
-} from "../store";
+} from "../../lib/state";
+import { PATHS } from "../../lib/router";
 
 const HOME_CATS = ["plomeria", "electricidad", "aire", "cerrajeria", "limpieza", "mecanica", "pintura", "ebanisteria"];
 const GROUP_CAT: Record<string, string> = { Hogar: "plomeria", "Técnicos": "aire", Automotriz: "mecanica", Tecnología: "camaras", Eventos: "fotografia", Construcción: "remodelacion" };
@@ -13,13 +15,15 @@ const GROUP_IC: Record<string, string> = { Hogar: "home", "Técnicos": "snow", A
 
 /* ─────────────────────────── HOME ─────────────────────────── */
 export function ClientHome({ go }: { go: (v: View) => void }) {
-  const { zoneId } = useApp();
+  const { zoneId, session } = useApp();
+  const nav = useNavigate();
   const [zoneOpen, setZoneOpen] = useState(false);
   const loading = useFakeLoad(800);
 
   const available = PROS.filter((p) => p.available);
   const top = [...PROS].sort((a, b) => b.rating - a.rating || b.reviews - a.reviews).slice(0, 4);
   const zone = zoneById(zoneId);
+  const firstName = (session?.name ?? "María Peralta").split(" ")[0];
 
   return (
     <div className="pb-8">
@@ -41,7 +45,7 @@ export function ClientHome({ go }: { go: (v: View) => void }) {
           <span className="ml-auto font-disp font-bold text-[1.05rem] tracking-tight text-ink hidden sm:block">
             altoque<span className="text-sun">.</span>
           </span>
-          <Face face={{ f: 3, q: 3 }} name="María Peralta" size="w-9 h-9" />
+          <Face face={{ f: 3, q: 3 }} name={session?.name ?? "María Peralta"} size="w-9 h-9" />
         </div>
       </header>
 
@@ -49,7 +53,8 @@ export function ClientHome({ go }: { go: (v: View) => void }) {
         {/* hero: what do you need */}
         <FadeUp>
           <section className="pt-8 pb-2">
-            <h1 className="font-disp font-bold text-[1.9rem] sm:text-[2.3rem] leading-[1.05] tracking-tight text-ink">
+            <p className="text-[0.8rem] font-bold text-mut">Hola, {firstName} 👋</p>
+            <h1 className="font-disp font-bold text-[1.9rem] sm:text-[2.3rem] leading-[1.05] tracking-tight text-ink mt-1">
               ¿Qué necesitas <span className="text-pine">hoy</span>?
             </h1>
             <p className="text-mut font-medium text-[0.95rem] mt-2">
@@ -134,7 +139,7 @@ export function ClientHome({ go }: { go: (v: View) => void }) {
                 </p>
               </div>
               <button
-                onClick={() => setRole("pro")}
+                onClick={() => { setRole("provider"); nav(PATHS.pro); }}
                 className="shrink-0 inline-flex items-center justify-center gap-2 bg-sun text-[#33230a] font-extrabold rounded-xl px-6 h-12 hover:bg-sun2 transition-colors active:scale-95"
               >
                 Modo profesional <Icon name="arrow" className="w-4.5 h-4.5" strokeWidth={2.4} />
@@ -398,7 +403,7 @@ export function ResultsView({ catId, go }: { catId: string; go: (v: View) => voi
   );
 }
 
-import { MapCard } from "../bits";
+import { MapCard } from "../../components/ui/kit";
 function MapMini() {
   return <MapCard label="Santiago de los Caballeros" />;
 }

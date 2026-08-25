@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Icon } from "../../components/icons";
-import { AvailDot, Face, FadeUp, JobPhoto, Stars, Verif } from "../bits";
-import { catById, proById, toggleFav, useApp, zoneById, type View } from "../store";
+import { AvailDot, Face, FadeUp, JobPhoto, Stars, Verif } from "../../components/ui/kit";
+import { catById, proById, toggleFav, useApp, zoneById, type View } from "../../lib/state";
 
 export function ProProfile({ id, go }: { id: string; go: (v: View) => void }) {
   const p = proById(id);
