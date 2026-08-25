@@ -1,42 +1,127 @@
-import { useState } from "react";
-import Nav from "./components/Nav";
-import Cover from "./components/Cover";
-import { Veredicto, Stack } from "./components/Strategy";
-import { Arquitectura, Datos } from "./components/Architecture";
-import StateMachine from "./components/StateMachine";
-import Prototype from "./components/Prototype";
-import { Pantallas, Confianza, Crecimiento } from "./components/Systems";
-import { Alcance, Plan, Aprobacion, Footer } from "./components/Roadmap";
+import { useEffect, useState } from "react";
+import { Icon } from "./components/icons";
+import BlueprintDoc from "./BlueprintDoc";
+import { ProApp } from "./app/pro/ProApp";
+import { ClientHome, ExploreView, ResultsView } from "./app/client/Home";
+import { ProProfile } from "./app/client/Profile";
+import { FavoritesTab, MeTab, RequestWizard, RequestsTab, TrackingView } from "./app/client/Flow";
+import { useApp, type Tab, type View } from "./app/store";
 
-export default function App() {
-  const [approved, setApproved] = useState(false);
+/* ── router por hash: #/docs abre la documentación interna ── */
+function useIsDocs() {
+  const [docs, setDocs] = useState(() => window.location.hash === "#/docs");
+  useEffect(() => {
+    const h = () => setDocs(window.location.hash === "#/docs");
+    window.addEventListener("hashchange", h);
+    return () => window.removeEventListener("hashchange", h);
+  }, []);
+  return docs;
+}
+
+const TAB_META: { k: Tab; icon: "home" | "search" | "clip" | "heart" | "user"; l: string }[] = [
+  { k: "home", icon: "home", l: "Inicio" },
+  { k: "explore", icon: "search", l: "Explorar" },
+  { k: "jobs", icon: "clip", l: "Solicitudes" },
+  { k: "favs", icon: "heart", l: "Favoritos" },
+  { k: "me", icon: "user", l: "Perfil" },
+];
+
+function ClientApp() {
+  const s = useApp();
+  const [tab, setTab] = useState<Tab>("home");
+  const [stack, setStack] = useState<View[]>([]);
+
+  const go = (v: View) => setStack((st) => [...st, v]);
+  const back = () => setStack((st) => st.slice(0, -1));
+  const jump = (t: Tab) => { setTab(t); setStack([]); };
+  const goSmart = (v: View) => {
+    if (v.t === "home" && stack.length > 0) back();
+    else go(v);
+  };
+
+  useEffect(() => { window.scrollTo({ top: 0 }); }, [tab, stack.length]);
+
+  const top = stack[stack.length - 1];
+  const viewKey = stack.map((v) => JSON.stringify(v)).join("|") || tab;
+  const activeCount = s.jobs.filter((j) => j.status !== "done" || !j.rating).length;
+
+  let body: React.ReactNode;
+  if (top?.t === "results") body = <ResultsView key={viewKey} catId={top.catId} go={goSmart} />;
+  else if (top?.t === "pro") body = <ProProfile key={viewKey} id={top.id} go={goSmart} />;
+  else if (top?.t === "request") body = <RequestWizard key={viewKey} catId={top.catId} proId={top.proId} go={goSmart} />;
+  else if (top?.t === "track") body = <TrackingView key={viewKey} jobId={top.jobId} go={goSmart} jump={jump} />;
+  else if (tab === "explore") body = <ExploreView go={goSmart} />;
+  else if (tab === "jobs") body = <RequestsTab go={goSmart} />;
+  else if (tab === "favs") body = <FavoritesTab go={goSmart} />;
+  else if (tab === "me") body = <MeTab go={goSmart} jump={jump} />;
+  else body = <ClientHome go={goSmart} />;
 
   return (
-    <div className="relative min-h-screen font-body">
-      {/* ambient layers */}
-      <div className="bp-glow" aria-hidden />
-      <div className="bp-grid fixed inset-0 z-0 pointer-events-none" aria-hidden />
-      <div className="bp-noise" aria-hidden />
+    <div className="min-h-dvh">
+      <div className="pb-24">{body}</div>
 
-      <div className="relative z-10">
-        <Nav approved={approved} />
-        <main>
-          <Cover />
-          <Veredicto />
-          <Stack />
-          <Arquitectura />
-          <Datos />
-          <StateMachine />
-          <Prototype />
-          <Pantallas />
-          <Confianza />
-          <Crecimiento />
-          <Alcance />
-          <Plan />
-          <Aprobacion approved={approved} onApprove={() => setApproved(true)} />
-        </main>
-        <Footer />
+      {/* bottom navigation */}
+      <nav className="fixed bottom-0 inset-x-0 z-50">
+        <div className="mx-auto max-w-md lg:max-w-xl px-4 pb-[max(0.8rem,env(safe-area-inset-bottom))]">
+          <div className="rounded-[1.6rem] bg-card/95 backdrop-blur border border-edge2 shadow-[0_12px_40px_rgba(20,27,23,0.14)] grid grid-cols-5 h-[4.2rem]">
+            {TAB_META.map((t) => {
+              const active = tab === t.k && stack.length === 0;
+              return (
+                <button
+                  key={t.k}
+                  onClick={() => jump(t.k)}
+                  className={`relative flex flex-col items-center justify-center gap-1 rounded-[1.2rem] mx-1 my-1.5 transition-all duration-200 ${active ? "bg-grnsoft text-grn" : "text-mut2 hover:text-mut"}`}
+                  aria-label={t.l}
+                >
+                  <span className="relative">
+                    <Icon name={t.icon} className={`w-[1.35rem] h-[1.35rem] transition-transform ${active ? "scale-110" : ""}`} strokeWidth={active ? 2.3 : 1.9} />
+                    {t.k === "jobs" && activeCount > 0 && (
+                      <span className="absolute -top-1 -right-2 min-w-4 h-4 px-0.5 rounded-full bg-fire text-white text-[0.55rem] font-extrabold grid place-items-center">
+                        {activeCount}
+                      </span>
+                    )}
+                  </span>
+                  <span className={`text-[0.58rem] font-extrabold ${active ? "" : "opacity-90"}`}>{t.l}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </nav>
+    </div>
+  );
+}
+
+function Toast() {
+  const { toastMsg, toastId } = useApp();
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    if (!toastMsg) return;
+    setShow(true);
+    const t = setTimeout(() => setShow(false), 3000);
+    return () => clearTimeout(t);
+  }, [toastId]);
+  if (!show || !toastMsg) return null;
+  return (
+    <div key={toastId} className="fixed bottom-24 inset-x-0 z-[80] flex justify-center px-5 pointer-events-none">
+      <div className="animate-pop bg-ink2 text-white rounded-full pl-4 pr-5 py-3 text-sm font-bold shadow-2xl max-w-md text-center flex items-center gap-2.5">
+        <span className="w-2 h-2 rounded-full bg-[#3ecf8e] shrink-0" />
+        {toastMsg}
       </div>
+    </div>
+  );
+}
+
+export default function App() {
+  const docs = useIsDocs();
+  const { role } = useApp();
+
+  if (docs) return <BlueprintDoc />;
+
+  return (
+    <div className="p-root min-h-dvh">
+      {role === "pro" ? <ProApp /> : <ClientApp />}
+      <Toast />
     </div>
   );
 }

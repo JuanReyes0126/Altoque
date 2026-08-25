@@ -1,5 +1,137 @@
 @import "tailwindcss";
 
+/* ── AlToque · design system del producto ── */
+@theme {
+  --color-bg: #f6f5f0;
+  --color-card: #ffffff;
+  --color-tint: #eef2ec;
+  --color-ink2: #141b17;
+  --color-mut: #68736c;
+  --color-mut2: #9aa59d;
+  --color-edge: #e6e4da;
+  --color-edge2: #efede4;
+  --color-grn: #0c5f46;
+  --color-grn2: #0a4e3a;
+  --color-grnsoft: #e3efe8;
+  --color-sun: #ffb300;
+  --color-sunsoft: #fff3d3;
+  --color-fire: #ff5a3c;
+  --color-firesoft: #ffe9e3;
+  --color-sky: #2f6bff;
+  --color-skysoft: #e8efff;
+  --color-night: #101613;
+  --color-ncard: #1a221d;
+  --color-nsurf: #222c25;
+  --color-nline: #2c3830;
+  --color-ntxt: #e9f0ea;
+  --color-nmut: #93a398;
+
+  --font-pro: "Space Grotesk", "Plus Jakarta Sans", sans-serif;
+  --font-txt: "Plus Jakarta Sans", system-ui, sans-serif;
+
+  --animate-rise: rise 0.55s cubic-bezier(0.22, 0.9, 0.3, 1) both;
+  --animate-pop: pop 0.35s cubic-bezier(0.2, 1.2, 0.4, 1) both;
+  --animate-ring2: ring 2.2s cubic-bezier(0.2, 0.6, 0.3, 1) infinite;
+  --animate-blinkc: blinkc 1s steps(2, start) infinite;
+  --animate-shimmer: shimmer 1.4s linear infinite;
+  --animate-slideup: slideup 0.45s cubic-bezier(0.22, 0.9, 0.3, 1) both;
+  --animate-fadein: fadein 0.4s ease both;
+  --animate-radar: radar 2.6s ease-out infinite;
+  --animate-wiggle: wiggle 0.5s ease-in-out;
+}
+
+@keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+@keyframes pop { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: scale(1); } }
+@keyframes blinkc { 50% { opacity: 0.25; } }
+@keyframes shimmer { from { background-position: -200% 0; } to { background-position: 200% 0; } }
+@keyframes slideup { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+@keyframes radar {
+  0% { transform: scale(0.35); opacity: 0.8; }
+  70% { opacity: 0.12; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+@keyframes wiggle { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-1.5deg); } 75% { transform: rotate(1.5deg); } }
+
+@layer base {
+  .p-root {
+    font-family: var(--font-txt);
+    background: var(--color-bg);
+    color: var(--color-ink2);
+    -webkit-font-smoothing: antialiased;
+  }
+  .font-disp { font-family: var(--font-pro); }
+}
+
+@layer components {
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { scrollbar-width: none; }
+
+  .card {
+    background: var(--color-card);
+    border: 1px solid var(--color-edge2);
+    border-radius: 20px;
+    box-shadow: 0 1px 2px rgba(20, 27, 23, 0.04), 0 10px 28px rgba(20, 27, 23, 0.05);
+  }
+  .card-h { transition: transform 0.25s cubic-bezier(0.2, 0.9, 0.3, 1), box-shadow 0.25s ease; }
+  @media (hover: hover) {
+    .card-h:hover { transform: translateY(-3px); box-shadow: 0 2px 4px rgba(20, 27, 23, 0.05), 0 18px 40px rgba(20, 27, 23, 0.09); }
+  }
+
+  .btn-prime {
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+    background: var(--color-grn); color: #fff; font-weight: 700;
+    border-radius: 999px; transition: transform 0.15s ease, background 0.2s ease, box-shadow 0.2s ease;
+    box-shadow: 0 8px 20px rgba(12, 95, 70, 0.28);
+  }
+  .btn-prime:hover { background: var(--color-grn2); }
+  .btn-prime:active { transform: scale(0.97); }
+
+  .btn-ghost {
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+    background: var(--color-card); color: var(--color-ink2); font-weight: 700;
+    border: 1.5px solid var(--color-edge); border-radius: 999px;
+    transition: transform 0.15s ease, border-color 0.2s ease, background 0.2s;
+  }
+  .btn-ghost:hover { border-color: #cfd4ca; background: #fff; }
+  .btn-ghost:active { transform: scale(0.97); }
+
+  .chip-on { background: var(--color-ink2); color: #fff; border-color: var(--color-ink2); }
+
+  .skel {
+    background: linear-gradient(100deg, #ecebe2 40%, #f7f6ef 50%, #ecebe2 60%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s linear infinite;
+    border-radius: 12px;
+  }
+
+  .mapgrid {
+    background-color: #e9efe7;
+    background-image:
+      linear-gradient(rgba(12, 95, 70, 0.07) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(12, 95, 70, 0.07) 1px, transparent 1px),
+      linear-gradient(rgba(12, 95, 70, 0.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(12, 95, 70, 0.045) 1px, transparent 1px);
+    background-size: 96px 96px, 96px 96px, 24px 24px, 24px 24px;
+  }
+  .mapgrid-dark {
+    background-color: #16201a;
+    background-image:
+      linear-gradient(rgba(233, 240, 234, 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(233, 240, 234, 0.06) 1px, transparent 1px);
+    background-size: 44px 44px;
+  }
+}
+
+/* accesibilidad: respeta prefers-reduced-motion en el producto */
+@media (prefers-reduced-motion: reduce) {
+  .animate-rise, .animate-pop, .animate-slideup, .animate-fadein,
+  .animate-wiggle, .animate-blinkc, .animate-radar, .animate-ping {
+    animation: none !important;
+  }
+}
+
+/* blueprint original theme (documentación interna) */
 @theme {
   --color-ink: #071426;
   --color-deep: #0a1c33;
