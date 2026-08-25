@@ -229,6 +229,7 @@ model address {
   updated_at DateTime @updatedAt
 
   customer_profile_default customer_profile[] @relation("default_address")
+  service_request          service_request[]
 
   @@index([user_id])
 }
