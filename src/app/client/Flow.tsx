@@ -1,656 +1,598 @@
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "../../components/icons";
-import { Face, FadeUp, FavBtn, MapCard, ProCard, ProListItem, Radar, Sheet, Stars, useFakeLoad } from "../bits";
+import { AvailDot, Face, FadeUp, JobPhoto, MapCard, ProListItem, Radar, RowHead, Stars, Verif, useFakeLoad } from "../bits";
 import {
-  CATS, JOB_IMGS, PROBLEMS, ZONES, advanceJob, catById, createJob, fmt, jobUrl, proById, prosByCat, rateJob,
-  setRole, setZone, useApp, zoneById, type Job, type View, type When,
+  CATS, JOB_IMGS, PROBLEMS, ZONES, advanceJob, catById, createJob, fmt, proById, prosByCat, rateJob,
+  setRole, toggleFav, useApp, zoneById, type View,
 } from "../store";
 
-/* ─────────────────────────── ASISTENTE DE SOLICITUD ─────────────────────────── */
+/* ════════════════ REQUEST WIZARD ════════════════ */
 export function RequestWizard({ catId: initCat, proId, go }: { catId?: string; proId?: string; go: (v: View) => void }) {
   const s = useApp();
-  const [step, setStep] = useState(proId ? 2 : 1);
-  const [catId, setCatId] = useState(initCat ?? (proId ? proById(proId).cats[0] : ""));
+  const prePro = proId ? proById(proId) : null;
+  const [catId, setCatId] = useState(initCat ?? prePro?.cats[0] ?? "");
   const [problem, setProblem] = useState("");
   const [photos, setPhotos] = useState<number[]>([]);
-  const [when, setWhen] = useState<When>("now");
-  const [sched, setSched] = useState({ date: "", hora: "Mañana" });
+  const [when, setWhen] = useState<"now" | "later" | "quote">("now");
   const [zoneId, setZoneId] = useState(s.zoneId);
-  const [matching, setMatching] = useState(false);
-  const [selPro, setSelPro] = useState<string | null>(proId ?? null);
-  const c = catId ? catById(catId) : null;
-  const max = proId ? 4 : 5;
+  const [sched, setSched] = useState({ date: "", hora: "" });
+  const [selPro, setSelPro] = useState(proId ?? "");
+  const [step, setStep] = useState(initCat || prePro ? 1 : 0);
+
+  const steps = ["Categoría", "Problema", "Cuándo", "Ubicación", "Confirmar"];
+  const cat = catId ? catById(catId) : null;
+  const suggestions = catId ? PROBLEMS[catId] ?? [] : [];
+  const matches = useMemo(
+    () => (catId ? prosByCat(catId).filter((p) => p.available).sort((a, b) => b.rating - a.rating) : []),
+    [catId],
+  );
 
   const canNext =
-    step === 1 ? !!catId :
-    step === 2 ? problem.trim().length >= 6 :
-    step === 3 ? (when !== "later" || !!sched.date) :
-    true;
+    step === 0 ? !!catId :
+    step === 1 ? problem.trim().length > 0 :
+    step === 2 ? when !== "later" || (sched.date && sched.hora) :
+    step === 3 ? true :
+    when === "quote" ? true : (!!selPro || matches.length === 0);
 
   const submit = () => {
     const id = createJob({
-      catId, problem: problem.trim(), photos, when, zoneId,
-      note: "", scheduledFor: when === "later" ? `${sched.date} · ${sched.hora}` : undefined,
-      proId: selPro ?? undefined,
+      catId, problem: problem.trim(), photos, when, zoneId, note: "",
+      scheduledFor: when === "later" ? `${sched.date} · ${sched.hora}` : undefined,
+      proId: selPro || undefined,
     });
     go({ t: "track", jobId: id });
   };
 
   return (
-    <div className="max-w-2xl mx-auto px-5 pb-40">
-      <header className="sticky top-0 z-40 bg-bg/90 backdrop-blur-md pt-4 pb-3">
+    <div className="max-w-2xl mx-auto px-5 pb-32">
+      {/* header + progress */}
+      <header className="sticky top-0 z-40 bg-paper/90 backdrop-blur-md pt-3 pb-3 border-b border-line2 -mx-5 px-5">
         <div className="flex items-center gap-3">
-          <button onClick={() => (step > 1 && !matching ? setStep(step - 1) : go({ t: "home" }))} className="w-10 h-10 grid place-items-center rounded-full card" aria-label="Atrás">
+          <button onClick={() => (step === 0 || (step === 1 && (initCat || prePro)) ? go({ t: "home" }) : setStep(step - 1))} className="w-10 h-10 grid place-items-center rounded-full card shrink-0" aria-label="Atrás">
             <Icon name="chevl" className="w-4.5 h-4.5" strokeWidth={2.4} />
           </button>
-          <div className="flex-1">
-            <p className="font-disp font-bold">{step < max ? "Nueva solicitud" : "Confirmar profesional"}</p>
-            <div className="flex gap-1.5 mt-1.5">
-              {Array.from({ length: max }).map((_, i) => (
-                <span key={i} className={`h-1.5 flex-1 rounded-full transition-all duration-500 ${i < step ? "bg-grn" : "bg-edge"}`} />
-              ))}
-            </div>
-          </div>
-          <span className="font-disp font-bold text-sm text-mut">{step}/{max}</span>
-        </div>
-      </header>
-
-      {/* PASO 1 · categoría */}
-      {step === 1 && (
-        <FadeUp key="s1">
-          <h1 className="font-disp font-bold text-2xl sm:text-3xl">¿Qué necesitas?</h1>
-          <p className="text-mut mt-1.5 text-sm">Elige la categoría del servicio</p>
-          <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 mt-6">
-            {CATS.slice(0, 12).map((cc) => (
-              <button
-                key={cc.id}
-                onClick={() => { setCatId(cc.id); setStep(2); }}
-                className={`card card-h p-4 flex flex-col items-center gap-2 text-center transition-all ${catId === cc.id ? "!border-grn ring-2 ring-grn/25" : ""}`}
-              >
-                <span className="w-12 h-12 rounded-2xl bg-grnsoft text-grn grid place-items-center">
-                  <Icon name={cc.icon as never} className="w-6 h-6" strokeWidth={1.8} />
-                </span>
-                <span className="text-xs font-bold leading-tight">{cc.name}</span>
-              </button>
-            ))}
-          </div>
-        </FadeUp>
-      )}
-
-      {/* PASO 2 · problema + fotos */}
-      {step === 2 && c && (
-        <FadeUp key="s2">
-          <h1 className="font-disp font-bold text-2xl sm:text-3xl">Cuéntanos el problema</h1>
-          <p className="text-mut mt-1.5 text-sm">Mientras más detalle, más rápido y preciso será el servicio</p>
-          <div className="flex flex-wrap gap-2 mt-5">
-            {(PROBLEMS[c.id] ?? ["Revisión general", "Instalación", "Reparación urgente"]).map((q) => (
-              <button key={q} onClick={() => setProblem(q)} className={`rounded-full border px-4 py-2.5 text-sm font-bold transition-all active:scale-95 ${problem === q ? "chip-on" : "border-edge bg-card text-mut hover:border-grn/50"}`}>
-                {q}
-              </button>
-            ))}
-          </div>
-          <textarea
-            value={problem}
-            onChange={(e) => setProblem(e.target.value)}
-            rows={3}
-            placeholder="Ej.: Tengo una fuga debajo del fregadero desde anoche…"
-            className="mt-4 w-full card p-4 text-[0.95rem] font-semibold outline-none focus:border-grn/60 transition-colors resize-none placeholder:text-mut2"
-          />
-          <p className="text-[0.65rem] font-extrabold tracking-[0.18em] text-mut2 uppercase mt-6 mb-2.5">Agrega fotografías (opcional)</p>
-          <div className="flex gap-3 overflow-x-auto no-scrollbar -mx-5 px-5">
-            {JOB_IMGS.map((img, i) => {
-              const on = photos.includes(i);
-              return (
-                <button
-                  key={i}
-                  onClick={() => setPhotos(on ? photos.filter((x) => x !== i) : photos.length < 3 ? [...photos, i] : photos)}
-                  className={`relative w-20 h-20 rounded-2xl overflow-hidden shrink-0 border-2 transition-all ${on ? "border-grn ring-2 ring-grn/30" : "border-transparent opacity-80 hover:opacity-100"}`}
-                  aria-label={`Foto ${img.label}`}
-                >
-                  <img
-                    src={jobUrl(i)} alt={img.label}
-                    className="w-[200%] h-[200%] object-cover"
-                    style={{ position: "absolute", left: img.q % 2 === 1 ? "-100%" : "0", top: img.q >= 2 ? "-100%" : "0" }}
-                    onError={(e) => ((e.target as HTMLImageElement).style.display = "none")}
-                  />
-                  {on && (
-                    <span className="absolute inset-0 grid place-items-center bg-grn/30">
-                      <span className="w-6 h-6 rounded-full bg-grn text-white grid place-items-center animate-pop"><Icon name="check" className="w-3.5 h-3.5" strokeWidth={3} /></span>
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-            <span className="w-20 h-20 rounded-2xl border-2 border-dashed border-edge grid place-items-center text-mut2 shrink-0">
-              <Icon name="cam" className="w-6 h-6" strokeWidth={1.8} />
-            </span>
-          </div>
-          {photos.length > 0 && <p className="text-xs font-bold text-grn mt-2">{photos.length} foto{photos.length > 1 ? "s" : ""} adjunta{photos.length > 1 ? "s" : ""}</p>}
-        </FadeUp>
-      )}
-
-      {/* PASO 3 · cuándo */}
-      {step === 3 && (
-        <FadeUp key="s3">
-          <h1 className="font-disp font-bold text-2xl sm:text-3xl">¿Cuándo lo necesitas?</h1>
-          <div className="space-y-3 mt-6">
-            {([
-              { k: "now", icon: "bolt", t: "Lo necesito ahora", d: "Un profesional disponible irá a tu ubicación", hot: true },
-              { k: "later", icon: "calendar", t: "Quiero programarlo", d: "Elige día y hora que te convengan" },
-              { k: "quote", icon: "doc", t: "Solicitar cotización", d: "Hasta 5 profesionales te envían precio" },
-            ] as const).map((o) => (
-              <button
-                key={o.k}
-                onClick={() => setWhen(o.k)}
-                className={`w-full card card-h p-5 flex items-center gap-4 text-left transition-all ${when === o.k ? "!border-grn ring-2 ring-grn/25" : ""}`}
-              >
-                <span className={`w-13 h-13 rounded-2xl grid place-items-center shrink-0 py-3 px-3 ${o.k === "now" ? "bg-fire text-white" : "bg-tint text-grn"}`}>
-                  <Icon name={o.icon as never} className="w-6 h-6" strokeWidth={2} />
-                </span>
-                <span className="flex-1">
-                  <span className="block font-disp font-bold text-lg leading-tight">{o.t}</span>
-                  <span className="block text-sm text-mut font-semibold mt-0.5">{o.d}</span>
-                </span>
-                <span className={`w-6 h-6 rounded-full border-2 grid place-items-center shrink-0 transition-all ${when === o.k ? "border-grn bg-grn" : "border-edge"}`}>
-                  {when === o.k && <Icon name="check" className="w-3 h-3 text-white" strokeWidth={3.4} />}
-                </span>
-              </button>
-            ))}
-          </div>
-          {when === "later" && (
-            <div className="card p-5 mt-4 animate-pop">
-              <p className="text-[0.65rem] font-extrabold tracking-[0.18em] text-mut2 uppercase mb-3">Programar visita</p>
-              <input
-                type="date" value={sched.date} min={new Date().toISOString().slice(0, 10)}
-                onChange={(e) => setSched({ ...sched, date: e.target.value })}
-                className="w-full rounded-xl border border-edge px-4 h-12 font-bold text-sm outline-none focus:border-grn/60 bg-card"
-              />
-              <div className="flex gap-2 mt-3">
-                {["Mañana", "Tarde", "Noche"].map((h) => (
-                  <button key={h} onClick={() => setSched({ ...sched, hora: h })} className={`flex-1 rounded-xl border py-2.5 text-sm font-bold transition-all ${sched.hora === h ? "chip-on" : "border-edge text-mut"}`}>
-                    {h}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </FadeUp>
-      )}
-
-      {/* PASO 4 · ubicación */}
-      {step === 4 && (
-        <FadeUp key="s4">
-          <h1 className="font-disp font-bold text-2xl sm:text-3xl">¿Dónde?</h1>
-          <p className="text-mut mt-1.5 text-sm">Tu dirección exacta se comparte solo cuando el profesional acepta</p>
-          <div className="mt-5"><MapCard zoneId={zoneId} h="h-48" /></div>
-          <div className="flex items-center gap-3 card p-4 mt-4">
-            <span className="w-10 h-10 rounded-full bg-grnsoft text-grn grid place-items-center shrink-0"><Icon name="pin" className="w-5 h-5" strokeWidth={2.1} /></span>
-            <div className="flex-1 min-w-0">
-              <p className="font-bold text-sm truncate">{zoneById(zoneId).name}, Santiago</p>
-              <p className="text-[0.65rem] text-mut2 font-semibold">Ubicación seleccionada</p>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-2 mt-3">
-            {ZONES.slice(0, 6).map((z) => (
-              <button key={z.id} onClick={() => setZoneId(z.id)} className={`rounded-xl border px-3.5 py-3 text-left text-xs font-bold transition-all ${zoneId === z.id ? "border-grn bg-grnsoft text-grn" : "border-edge bg-card text-mut hover:border-grn/40"}`}>
-                <Icon name="pin" className="w-3 h-3 inline mr-1" strokeWidth={2.4} />{z.name}
-              </button>
-            ))}
-          </div>
-        </FadeUp>
-      )}
-
-      {/* PASO 5 · matching */}
-      {step === 5 && c && !matching && (
-        <FadeUp key="s5" className="text-center py-6">
-          <div className="flex justify-center"><Radar size={190}><Icon name={c.icon as never} className="w-10 h-10 text-grn" strokeWidth={1.7} /></Radar></div>
-          <h1 className="font-disp font-bold text-2xl mt-5">Buscando {c.name.toLowerCase()} cerca de ti…</h1>
-          <p className="text-mut text-sm mt-1.5">Priorizando disponibilidad, zona y calificación</p>
-          <button onClick={() => setMatching(true)} className="btn-ghost h-12 px-6 mt-6 text-sm">Mostrar resultados</button>
-        </FadeUp>
-      )}
-      {step === 5 && matching && (
-        <FadeUp key="s5b">
-          <h1 className="font-disp font-bold text-2xl">Profesionales disponibles</h1>
-          <p className="text-mut text-sm mt-1 mb-4">{prosByCat(catId).filter((p) => p.available).length} pueden atenderte ahora en {zoneById(zoneId).name}</p>
-          <div className="space-y-3.5">
-            {prosByCat(catId).sort((a, b) => Number(b.available) - Number(a.available) || b.rating - a.rating).map((p, i) => (
-              <ProListItem key={p.id} p={p} delay={i * 60} onOpen={() => go({ t: "pro", id: p.id })} onRequest={() => setSelPro(p.id)} />
-            ))}
-          </div>
-        </FadeUp>
-      )}
-
-      {/* barra inferior */}
-      <div className="fixed bottom-20 inset-x-0 z-40">
-        <div className="max-w-2xl mx-auto px-5">
-          <div className="card p-3 flex items-center gap-3 shadow-xl">
-            {c && step > 1 && (
-              <span className="hidden sm:flex items-center gap-2 rounded-full bg-tint px-3 py-1.5 text-xs font-bold text-mut shrink-0">
-                <Icon name={c.icon as never} className="w-3.5 h-3.5 text-grn" strokeWidth={2} /> {c.name}
-              </span>
-            )}
-            {selPro && step >= 2 && (
-              <span className="flex items-center gap-2 rounded-full bg-grnsoft text-grn2 px-3 py-1.5 text-xs font-extrabold shrink-0">
-                <Face face={proById(selPro).face} name={proById(selPro).name} size="w-5 h-5" /> {proById(selPro).name.split(" ")[0]}
-              </span>
-            )}
-            <button
-              disabled={!canNext}
-              onClick={() => (step < max ? (step === 4 && !proId ? setStep(5) : setStep(step + 1)) : submit())}
-              className="btn-prime flex-1 h-13 text-base disabled:opacity-40 disabled:shadow-none py-3"
-            >
-              {step < max ? "Continuar" : when === "quote" ? "Solicitar cotizaciones" : when === "later" ? "Programar servicio" : "Enviar solicitud"}
-              <Icon name="arrow" className="w-4.5 h-4.5" strokeWidth={2.4} />
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ─────────────────────────── SEGUIMIENTO ─────────────────────────── */
-const STEPS: { k: Job["status"]; l: string; icon: string }[] = [
-  { k: "accepted", l: "Solicitud aceptada", icon: "check" },
-  { k: "enroute", l: "En camino", icon: "car" },
-  { k: "arrived", l: "Llegó a tu ubicación", icon: "pin" },
-  { k: "started", l: "Servicio iniciado", icon: "wrench" },
-  { k: "done", l: "Servicio completado", icon: "star" },
-];
-const ORDER: Record<string, number> = { searching: -1, quoted: 9, accepted: 0, enroute: 1, arrived: 2, started: 3, done: 4 };
-
-export function TrackingView({ jobId, go, jump }: { jobId: string; go: (v: View) => void; jump: (t: "jobs") => void }) {
-  const s = useApp();
-  const job = s.jobs.find((j) => j.id === jobId);
-  const [eta, setEta] = useState<number | null>(null);
-  const [reviewOpen, setReviewOpen] = useState(false);
-  const [stars, setStars] = useState(0);
-  const [tags, setTags] = useState<string[]>([]);
-  const [text, setText] = useState("");
-  const [thanks, setThanks] = useState(false);
-
-  useEffect(() => { if (job?.etaLeft != null) setEta(job.etaLeft); }, [job?.etaLeft != null]);
-  useEffect(() => {
-    if (!job || job.status !== "enroute") return;
-    const t = setInterval(() => setEta((v) => (v != null && v > 0 ? v - 1 : v)), 1000);
-    return () => clearInterval(t);
-  }, [job?.status]);
-
-  if (!job) return null;
-  const cat = catById(job.catId);
-  const pro = job.proId ? proById(job.proId) : null;
-  const idx = ORDER[job.status];
-
-  /* cotización */
-  if (job.status === "quoted") {
-    return (
-      <div className="max-w-xl mx-auto px-5 pt-10 pb-24 text-center">
-        <FadeUp>
-          <div className="flex justify-center"><Radar size={180}><Icon name="doc" className="w-10 h-10 text-grn" strokeWidth={1.7} /></Radar></div>
-          <h1 className="font-disp font-bold text-2xl mt-5">Cotización solicitada</h1>
-          <p className="text-mut mt-2 text-sm leading-relaxed">
-            5 profesionales de <strong>{cat.name}</strong> recibieron tu descripción{job.photos.length > 0 && ` y tus ${job.photos.length} fotos`}.
-            Te llegarán respuestas con precio y disponibilidad.
-          </p>
-          <div className="card p-4 mt-6 text-left space-y-3">
-            {prosByCat(job.catId).slice(0, 3).map((p, i) => (
-              <div key={p.id} className="flex items-center gap-3">
-                <Face face={p.face} name={p.name} size="w-10 h-10" />
-                <div className="flex-1">
-                  <p className="font-bold text-sm">{p.name}</p>
-                  <p className="text-[0.65rem] text-mut2 font-semibold">Respondió {["hace 4 min", "hace 11 min", "hace 19 min"][i]}</p>
-                </div>
-                <span className="font-disp font-bold text-grn">{fmt(p.price + (i + 1) * 350)}</span>
-              </div>
-            ))}
-          </div>
-          <button onClick={() => go({ t: "home" })} className="btn-prime h-13 px-8 mt-6 py-3">Entendido</button>
-        </FadeUp>
-      </div>
-    );
-  }
-
-  /* programado */
-  if (job.when === "later" && job.status === "searching") {
-    return (
-      <div className="max-w-xl mx-auto px-5 pt-10 pb-24 text-center">
-        <FadeUp>
-          <span className="text-5xl">📅</span>
-          <h1 className="font-disp font-bold text-2xl mt-4">Servicio programado</h1>
-          <p className="text-mut mt-2 text-sm">{cat.name} · <strong>{job.scheduledFor}</strong> en {zoneById(job.zoneId).name}.</p>
-          <div className="card p-4 mt-6 text-left">
-            <p className="text-sm font-semibold text-ink2/85">“{job.problem}”</p>
-          </div>
-          <p className="text-xs text-mut mt-4">Te notificaremos cuando un profesional confirme la visita.</p>
-          <button onClick={() => go({ t: "home" })} className="btn-prime h-13 px-8 mt-6 py-3">Volver al inicio</button>
-        </FadeUp>
-      </div>
-    );
-  }
-
-  const mins = eta != null ? Math.max(1, Math.ceil(eta / 60)) : job.etaMin ?? 0;
-
-  return (
-    <div className="max-w-xl mx-auto px-5 pb-24">
-      <header className="sticky top-0 z-40 bg-bg/90 backdrop-blur-md py-3 flex items-center gap-3">
-        <button onClick={() => jump("jobs")} className="w-10 h-10 grid place-items-center rounded-full card" aria-label="Volver">
-          <Icon name="chevl" className="w-4.5 h-4.5" strokeWidth={2.4} />
-        </button>
-        <div>
-          <p className="font-disp font-bold">Seguimiento en vivo</p>
-          <p className="text-[0.65rem] font-bold text-mut2 uppercase tracking-wider">{cat.name} · #{job.id.slice(-4).toUpperCase()}</p>
-        </div>
-      </header>
-
-      {job.status === "searching" ? (
-        <FadeUp className="text-center pt-8">
-          <div className="flex justify-center"><Radar size={200}><Icon name={cat.icon as never} className="w-10 h-10 text-grn" strokeWidth={1.7} /></Radar></div>
-          <h1 className="font-disp font-bold text-2xl mt-5">Buscando tu profesional…</h1>
-          <p className="text-mut text-sm mt-2">Avisamos a los {cat.name.toLowerCase()} disponibles en {zoneById(job.zoneId).name}</p>
-          <p className="text-xs text-mut2 font-bold mt-4 animate-blinkc">Normalmente aceptan en menos de 1 minuto</p>
-        </FadeUp>
-      ) : (
-        <>
-          {/* héroe de estado */}
-          <FadeUp>
-            <div className="card overflow-hidden mt-2">
-              <div className={`p-5 text-white relative overflow-hidden ${job.status === "done" ? "bg-grn" : "bg-ink2"}`}>
-                <div className="absolute inset-0 mapgrid-dark opacity-30" aria-hidden />
-                <div className="relative flex items-center gap-4">
-                  {pro && <Face face={pro.face} name={pro.name} size="w-16 h-16" ring />}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[0.65rem] font-extrabold tracking-[0.18em] uppercase text-white/60">
-                      {job.status === "done" ? "Servicio completado" : job.status === "started" ? "Servicio en curso" : job.status === "arrived" ? "Tu profesional llegó" : job.status === "enroute" ? "Viene en camino" : "Solicitud aceptada"}
-                    </p>
-                    <p className="font-disp font-bold text-xl truncate">{pro ? pro.name : "Asignando profesional"}</p>
-                    {pro && (
-                      <p className="flex items-center gap-1.5 text-sm text-white/80 font-semibold mt-0.5">
-                        <Stars n={pro.rating} size="w-3 h-3" /> {pro.rating} · {cat.name}
-                      </p>
-                    )}
-                  </div>
-                  {pro && <FavBtn id={pro.id} className="!bg-white/10 !border-white/20 !text-white shrink-0" />}
-                </div>
-                {job.status !== "done" && job.status !== "started" && (
-                  <div className="relative mt-5 flex items-end justify-between">
-                    <div>
-                      <p className="text-[0.65rem] font-extrabold tracking-[0.18em] uppercase text-white/60">Llegada estimada</p>
-                      <p className="font-disp font-bold text-5xl leading-none mt-1">
-                        {job.status === "arrived" ? "0:00" : `${mins}<span className="text-2xl"> min</span>`}
-                      </p>
-                    </div>
-                    <div className="relative w-14 h-14 grid place-items-center">
-                      {job.status === "enroute" && <span className="absolute inset-0 rounded-full bg-sun/30 animate-radar motion-reduce:hidden" />}
-                      <span className="relative w-11 h-11 rounded-full bg-sun text-ink2 grid place-items-center">
-                        <Icon name={job.status === "arrived" ? "pin" : "car"} className="w-5 h-5" strokeWidth={2} />
-                      </span>
-                    </div>
-                  </div>
-                )}
-                {job.status === "started" && (
-                  <p className="relative mt-4 text-sm font-bold text-white/85">
-                    {pro?.name.split(" ")[0]} está trabajando en: <span className="text-sun">“{job.problem}”</span>
-                  </p>
-                )}
-                {job.status === "done" && (
-                  <div className="relative mt-5 flex items-center justify-between">
-                    <p className="font-disp font-bold text-lg">Total acordado: {pro ? fmt(pro.price + 700) : "—"}</p>
-                    <span className="rounded-full bg-sun text-ink2 text-xs font-extrabold px-3 py-1.5">PENDIENTE TU RESEÑA</span>
-                  </div>
-                )}
-              </div>
-
-              {/* pasos */}
-              <div className="p-5">
-                <ol className="space-y-0">
-                  {STEPS.map((st, i) => {
-                    const done = idx > i || job.status === "done";
-                    const now = idx === i && job.status !== "done";
-                    return (
-                      <li key={st.k} className="flex gap-3.5">
-                        <div className="flex flex-col items-center">
-                          <span className={`w-9 h-9 rounded-full grid place-items-center shrink-0 transition-all duration-500 ${done ? "bg-grn text-white" : now ? "bg-sun text-ink2" : "bg-tint text-mut2"}`}>
-                            {now ? (
-                              <span className="relative w-2.5 h-2.5">
-                                <span className="absolute inset-0 rounded-full bg-ink2 animate-ping opacity-40 motion-reduce:hidden" />
-                                <span className="relative block w-2.5 h-2.5 rounded-full bg-ink2" />
-                              </span>
-                            ) : (
-                              <Icon name={st.icon as never} className="w-4 h-4" strokeWidth={2.2} />
-                            )}
-                          </span>
-                          {i < STEPS.length - 1 && <span className={`w-0.5 flex-1 min-h-6 transition-colors duration-500 ${done ? "bg-grn" : "bg-edge2"}`} />}
-                        </div>
-                        <div className="pb-5">
-                          <p className={`font-bold text-sm leading-9 ${done || now ? "" : "text-mut2"}`}>{st.l}</p>
-                          {now && st.k === "enroute" && (
-                            <p className="text-xs text-mut font-semibold -mt-1.5">ETA indicada por el profesional · tracking GPS en V2</p>
-                          )}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ol>
-
-                {job.status !== "done" && (
-                  <div className="flex gap-2 pt-1">
-                    <button onClick={() => advanceJob(job.id)} className="btn-ghost flex-1 h-11 text-xs">
-                      ⏩ Demo: avanzar estado
-                    </button>
-                    {job.status === "enroute" && eta != null && eta > 20 && (
-                      <button onClick={() => setEta(15)} className="btn-ghost h-11 px-4 text-xs">Acelerar llegada</button>
-                    )}
-                  </div>
-                )}
-                {job.status === "done" && (
-                  <button onClick={() => (job.rating ? setThanks(true) : setReviewOpen(true))} className="btn-prime w-full h-13 py-3 text-base mt-1">
-                    <Icon name="star" className="w-4.5 h-4.5" strokeWidth={2} />
-                    {job.rating ? `Calificaste con ${job.rating}★` : "Calificar servicio"}
-                  </button>
-                )}
-              </div>
-            </div>
-          </FadeUp>
-
-          {/* resumen */}
-          <FadeUp d={120}>
-            <div className="card p-5 mt-4">
-              <p className="text-[0.65rem] font-extrabold tracking-[0.18em] text-mut2 uppercase mb-3">Resumen del servicio</p>
-              <div className="flex items-start gap-3">
-                <span className="w-10 h-10 rounded-xl bg-grnsoft text-grn grid place-items-center shrink-0"><Icon name={cat.icon as never} className="w-5 h-5" strokeWidth={1.9} /></span>
-                <div className="flex-1">
-                  <p className="font-bold text-sm">{cat.name}</p>
-                  <p className="text-sm text-mut mt-0.5">“{job.problem}”</p>
-                  {job.photos.length > 0 && (
-                    <div className="flex gap-2 mt-2.5">
-                      {job.photos.map((pi) => (
-                        <span key={pi} className="relative w-12 h-12 rounded-xl overflow-hidden bg-tint">
-                          <img src={jobUrl(pi)} alt="" className="w-[200%] h-[200%] object-cover" style={{ position: "absolute", left: JOB_IMGS[pi].q % 2 === 1 ? "-100%" : "0", top: JOB_IMGS[pi].q >= 2 ? "-100%" : "0" }} />
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="flex items-center gap-2 mt-4 pt-4 border-t border-edge2 text-sm">
-                <Icon name="pin" className="w-4 h-4 text-mut2" strokeWidth={2.1} />
-                <span className="font-bold">{zoneById(job.zoneId).name}</span>
-                <span className="text-mut2">· Santiago</span>
-                <button className="ml-auto text-grn font-bold text-xs hover:underline underline-offset-4">Reportar problema</button>
-              </div>
-            </div>
-          </FadeUp>
-        </>
-      )}
-
-      {/* sheet de reseña */}
-      <Sheet open={reviewOpen || thanks} onClose={() => { setReviewOpen(false); setThanks(false); }} title={thanks ? undefined : "¿Cómo lo hizo?"}>
-        {thanks ? (
-          <div className="text-center py-8 animate-pop">
-            <span className="text-6xl">🎉</span>
-            <h3 className="font-disp font-bold text-2xl mt-4">¡Gracias, María!</h3>
-            <p className="text-mut text-sm mt-2">Tu reseña verificada ayuda a que otros vecinos elijan bien.</p>
-            <button onClick={() => { setThanks(false); go({ t: "home" }); }} className="btn-prime h-13 px-8 mt-6 py-3">Volver al inicio</button>
-          </div>
-        ) : (
-          <div>
-            {pro && (
-              <div className="flex items-center gap-3 mb-5">
-                <Face face={pro.face} name={pro.name} size="w-12 h-12" />
-                <div>
-                  <p className="font-disp font-bold">{pro.name}</p>
-                  <p className="text-xs text-mut font-semibold">{cat.name} · hoy</p>
-                </div>
-              </div>
-            )}
-            <div className="flex justify-center"><Stars n={stars} size="w-10 h-10" onSet={setStars} /></div>
-            <p className="text-center text-sm font-bold mt-2 h-5 text-mut">
-              {["", "Malo", "Regular", "Bien", "Muy bien", "¡Excelente!"][stars]}
+          <div className="min-w-0 flex-1">
+            <p className="font-disp font-bold text-[1rem] text-ink leading-tight truncate">
+              {cat ? cat.name : "Solicitar servicio"}
             </p>
-            <div className="flex flex-wrap justify-center gap-2 mt-4">
-              {["Puntual", "Ordenado", "Explicó bien", "Precio justo", "Trabajo impecable"].map((t) => (
-                <button key={t} onClick={() => setTags(tags.includes(t) ? tags.filter((x) => x !== t) : [...tags, t])} className={`rounded-full border px-3.5 py-2 text-xs font-bold transition-all ${tags.includes(t) ? "chip-on" : "border-edge text-mut"}`}>
-                  {t}
-                </button>
-              ))}
-            </div>
-            <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} placeholder="Cuenta cómo fue tu experiencia (opcional)…" className="mt-4 w-full card p-4 text-sm font-semibold outline-none focus:border-grn/60 resize-none placeholder:text-mut2" />
-            <button
-              disabled={stars === 0}
-              onClick={() => { rateJob(job.id, stars, [tags.join(", "), text].filter(Boolean).join(" · ")); setReviewOpen(false); setThanks(true); }}
-              className="btn-prime w-full h-13 py-3 mt-4 disabled:opacity-40 disabled:shadow-none"
-            >
-              Enviar calificación
-            </button>
+            <p className="text-[0.68rem] text-soft font-bold">Paso {step + 1} de {steps.length} · {steps[step]}</p>
           </div>
-        )}
-      </Sheet>
-    </div>
-  );
-}
-
-/* ─────────────────────────── TAB: SOLICITUDES ─────────────────────────── */
-const HISTORY = [
-  { id: "h1", cat: "aire", problem: "Mantenimiento del split de la habitación", pro: "p3", date: "12 feb", rating: 5, price: 1500 },
-  { id: "h2", cat: "electricidad", problem: "Instalación de 4 lámparas LED", pro: "p2", date: "28 ene", rating: 5, price: 1400 },
-  { id: "h3", cat: "limpieza", problem: "Limpieza profunda post-mudanza", pro: "p5", date: "9 ene", rating: 5, price: 2400 },
-];
-
-export function RequestsTab({ go }: { go: (v: View) => void }) {
-  const s = useApp();
-  const active = s.jobs.filter((j) => j.status !== "done" || !j.rating);
-  return (
-    <div className="max-w-2xl mx-auto px-5 pb-10">
-      <header className="pt-6 pb-4">
-        <h1 className="font-disp font-bold text-2xl">Tus solicitudes</h1>
-        <p className="text-mut text-sm mt-0.5">Activas e historial</p>
+        </div>
+        <div className="flex gap-1.5 mt-3">
+          {steps.map((_, i) => (
+            <span key={i} className={`h-1.5 flex-1 rounded-full transition-all duration-300 ${i <= step ? "bg-pine" : "bg-line"}`} />
+          ))}
+        </div>
       </header>
 
-      {active.length > 0 && (
-        <section className="mb-8">
-          <p className="text-[0.65rem] font-extrabold tracking-[0.18em] text-mut2 uppercase mb-3">En curso</p>
-          <div className="space-y-3">
-            {active.map((j) => {
-              const c = catById(j.catId);
-              const p = j.proId ? proById(j.proId) : null;
-              const label = j.status === "quoted" ? "Cotizando" : j.when === "later" && j.status === "searching" ? "Programado" : { searching: "Buscando profesional", accepted: "Aceptada", enroute: "En camino", arrived: "Llegó", started: "En curso", done: "Pendiente de calificar" }[j.status as "accepted"];
-              return (
-                <button key={j.id} onClick={() => go({ t: "track", jobId: j.id })} className="w-full card card-h p-4 flex items-center gap-4 text-left">
-                  <span className="w-13 h-13 rounded-2xl bg-grnsoft text-grn grid place-items-center shrink-0 py-3 px-3">
-                    <Icon name={c.icon as never} className="w-6 h-6" strokeWidth={1.8} />
-                  </span>
-                  <span className="flex-1 min-w-0">
-                    <span className="block font-bold text-sm truncate">{j.problem}</span>
-                    <span className="block text-xs text-mut font-semibold mt-0.5">{c.name} · {zoneById(j.zoneId).name}</span>
-                    {p && (
-                      <span className="flex items-center gap-1.5 mt-1.5 text-xs font-bold">
-                        <Face face={p.face} name={p.name} size="w-5 h-5" /> {p.name.split(" ")[0]} · ★ {p.rating}
-                      </span>
-                    )}
-                  </span>
-                  <span className="flex flex-col items-end gap-2 shrink-0">
-                    <span className={`rounded-full px-3 py-1 text-[0.62rem] font-extrabold ${j.status === "done" ? "bg-sunsoft text-[#8a5a00]" : j.status === "quoted" ? "bg-skysoft text-sky" : "bg-grnsoft text-grn"}`}>{label}</span>
-                    <Icon name="chevr" className="w-4 h-4 text-mut2" strokeWidth={2.4} />
-                  </span>
-                </button>
-              );
-            })}
+      {/* STEP 0 · categoría */}
+      {step === 0 && (
+        <section className="mt-6 animate-fadein">
+          <h2 className="font-disp font-bold text-[1.4rem] text-ink">¿Qué necesitas?</h2>
+          <p className="text-[0.85rem] text-mut font-medium mt-1">Elige la categoría del servicio.</p>
+          <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 mt-5">
+            {CATS.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => { setCatId(c.id); setStep(1); }}
+                className={`card card-h p-4 flex flex-col items-center gap-2 text-center ${catId === c.id ? "border-pine" : ""}`}
+              >
+                <span className="w-12 h-12 rounded-xl bg-pinesoft text-pine grid place-items-center">
+                  <Icon name={c.icon as never} className="w-6 h-6" strokeWidth={1.8} />
+                </span>
+                <span className="text-[0.72rem] font-bold text-ink leading-tight">{c.name}</span>
+              </button>
+            ))}
           </div>
         </section>
       )}
 
-      <section>
-        <p className="text-[0.65rem] font-extrabold tracking-[0.18em] text-mut2 uppercase mb-3">Historial</p>
-        {active.length === 0 && (
-          <div className="card p-8 text-center mb-4">
-            <span className="text-4xl">🧾</span>
-            <p className="font-disp font-bold mt-3">Aún no tienes solicitudes activas</p>
-            <p className="text-sm text-mut mt-1">Pide tu primer servicio en menos de un minuto.</p>
-            <button onClick={() => go({ t: "home" })} className="btn-prime h-12 px-6 mt-4 text-sm">Explorar servicios</button>
-          </div>
-        )}
-        <div className="space-y-3">
-          {HISTORY.map((h) => {
-            const c = catById(h.cat); const p = proById(h.pro);
-            return (
-              <div key={h.id} className="card p-4">
-                <div className="flex items-center gap-4">
-                  <Face face={p.face} name={p.name} size="w-12 h-12" />
-                  <div className="flex-1 min-w-0">
-                    <p className="font-bold text-sm truncate">{h.problem}</p>
-                    <p className="text-xs text-mut font-semibold mt-0.5">{p.name} · {h.date}</p>
-                    <div className="flex items-center gap-2 mt-1"><Stars n={h.rating} size="w-3 h-3" /><span className="text-xs font-bold">{h.rating}.0</span></div>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p className="font-disp font-bold text-grn">{fmt(h.price)}</p>
-                    <button onClick={() => go({ t: "request", proId: h.pro })} className="text-xs font-extrabold text-grn hover:underline underline-offset-4 mt-1">Repetir</button>
-                  </div>
-                </div>
+      {/* STEP 1 · problema */}
+      {step === 1 && (
+        <section className="mt-6 animate-fadein">
+          <h2 className="font-disp font-bold text-[1.4rem] text-ink">¿Qué ocurrió?</h2>
+          <p className="text-[0.85rem] text-mut font-medium mt-1">Describe el problema para que el pro llegue preparado.</p>
+
+          {suggestions.length > 0 && (
+            <div className="flex gap-2 overflow-x-auto no-scrollbar mt-4 -mx-5 px-5 sm:mx-0 sm:px-0">
+              {suggestions.map((sg) => (
+                <button key={sg} onClick={() => setProblem(sg)} className={`chip h-9 px-4 text-[0.76rem] shrink-0 ${problem === sg ? "chip-on" : ""}`}>{sg}</button>
+              ))}
+            </div>
+          )}
+
+          <textarea
+            value={problem}
+            onChange={(e) => setProblem(e.target.value)}
+            placeholder="Ej: Tengo una fuga debajo del fregadero desde esta mañana…"
+            rows={4}
+            className="mt-4 w-full card p-4 text-[0.9rem] font-medium text-ink placeholder:text-soft outline-none focus:border-pine/50 resize-none transition-colors"
+            aria-label="Descripción del problema"
+          />
+
+          <p className="text-[0.78rem] font-bold text-ink mt-5 mb-2.5">Fotografías <span className="text-soft font-semibold">(opcional)</span></p>
+          <div className="flex gap-3 overflow-x-auto no-scrollbar">
+            {photos.map((pi) => (
+              <div key={pi} className="relative shrink-0 w-20 h-20 rounded-2xl overflow-hidden">
+                <JobPhoto i={pi} />
+                <button onClick={() => setPhotos(photos.filter((x) => x !== pi))} className="absolute top-1 right-1 w-6 h-6 grid place-items-center rounded-full bg-ink/70 text-white" aria-label="Quitar foto">
+                  <Icon name="x" className="w-3 h-3" strokeWidth={2.6} />
+                </button>
               </div>
-            );
-          })}
+            ))}
+            {photos.length < 3 && (
+              <button
+                onClick={() => setPhotos([...photos, (photos.length + (cat ? CATS.indexOf(cat) : 0)) % JOB_IMGS.length])}
+                className="shrink-0 w-20 h-20 rounded-2xl border-2 border-dashed border-line grid place-items-center text-soft hover:border-pine hover:text-pine transition-colors"
+                aria-label="Añadir foto"
+              >
+                <Icon name="camera" className="w-6 h-6" strokeWidth={1.8} />
+              </button>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* STEP 2 · cuándo */}
+      {step === 2 && (
+        <section className="mt-6 animate-fadein">
+          <h2 className="font-disp font-bold text-[1.4rem] text-ink">¿Cuándo lo necesitas?</h2>
+          <div className="space-y-3 mt-5">
+            {([
+              { k: "now", ic: "bolt", t: "Ahora", d: "Necesito alguien cuanto antes", tone: "sun" },
+              { k: "later", ic: "calendar", t: "Programar", d: "Elige una fecha y hora", tone: "sky" },
+              { k: "quote", ic: "doc", t: "Cotizar", d: "Describe y recibe propuestas", tone: "pine" },
+            ] as const).map((o) => (
+              <button
+                key={o.k}
+                onClick={() => setWhen(o.k)}
+                className={`w-full card card-h p-4 flex items-center gap-4 text-left border-2 ${when === o.k ? "border-pine bg-pinesoft/50" : "border-line2"}`}
+              >
+                <span className={`w-12 h-12 rounded-xl grid place-items-center shrink-0 ${o.tone === "sun" ? "bg-sunsoft text-sun2" : o.tone === "sky" ? "bg-skysoft text-sky" : "bg-pinesoft text-pine"}`}>
+                  <Icon name={o.ic as never} className="w-6 h-6" strokeWidth={1.9} />
+                </span>
+                <span className="flex-1">
+                  <span className="block font-disp font-bold text-[1rem] text-ink">{o.t}</span>
+                  <span className="block text-[0.76rem] text-mut font-semibold">{o.d}</span>
+                </span>
+                <span className={`w-5 h-5 rounded-full border-2 grid place-items-center shrink-0 ${when === o.k ? "border-pine bg-pine" : "border-line"}`}>
+                  {when === o.k && <Icon name="check" className="w-2.5 h-2.5 text-white" strokeWidth={3.4} />}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {when === "later" && (
+            <div className="grid grid-cols-2 gap-3 mt-4 animate-rise">
+              <input type="date" value={sched.date} onChange={(e) => setSched({ ...sched, date: e.target.value })} className="card h-12 px-4 text-[0.85rem] font-bold text-ink outline-none focus:border-pine/50" aria-label="Fecha" />
+              <input type="time" value={sched.hora} onChange={(e) => setSched({ ...sched, hora: e.target.value })} className="card h-12 px-4 text-[0.85rem] font-bold text-ink outline-none focus:border-pine/50" aria-label="Hora" />
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* STEP 3 · ubicación */}
+      {step === 3 && (
+        <section className="mt-6 animate-fadein">
+          <h2 className="font-disp font-bold text-[1.4rem] text-ink">¿Dónde?</h2>
+          <p className="text-[0.85rem] text-mut font-medium mt-1">Confirma tu ubicación para buscar pros cercanos.</p>
+          <div className="mt-4"><MapCard label={zoneById(zoneId).name} /></div>
+          <div className="mt-4 space-y-2">
+            {ZONES.slice(0, 6).map((z) => (
+              <button key={z.id} onClick={() => setZoneId(z.id)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl border text-left transition-all ${zoneId === z.id ? "border-pine bg-pinesoft" : "border-line2 bg-card"}`}>
+                <Icon name="pin" className={`w-4.5 h-4.5 ${zoneId === z.id ? "text-pine" : "text-soft"}`} strokeWidth={2.1} />
+                <span className="flex-1 text-[0.88rem] font-bold text-ink">{z.name}</span>
+                {zoneId === z.id && <Icon name="check" className="w-4.5 h-4.5 text-pine" strokeWidth={2.6} />}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* STEP 4 · confirmar / elegir pro */}
+      {step === 4 && (
+        <section className="mt-6 animate-fadein">
+          {when === "quote" ? (
+            <>
+              <h2 className="font-disp font-bold text-[1.4rem] text-ink">Recibe cotizaciones</h2>
+              <p className="text-[0.85rem] text-mut font-medium mt-1">Enviaremos tu solicitud a {matches.length || 5} profesionales de {cat?.name}.</p>
+              <div className="card p-5 mt-5 space-y-3">
+                <SummaryRow l="Servicio" v={cat?.name ?? ""} />
+                <SummaryRow l="Problema" v={problem} />
+                <SummaryRow l="Ubicación" v={zoneById(zoneId).name} />
+                <SummaryRow l="Fotos" v={photos.length ? `${photos.length} adjuntas` : "Sin fotos"} />
+              </div>
+            </>
+          ) : (
+            <>
+              <h2 className="font-disp font-bold text-[1.4rem] text-ink">
+                {prePro || selPro ? "Confirma tu profesional" : "Elige un profesional"}
+              </h2>
+              <p className="text-[0.85rem] text-mut font-medium mt-1">
+                {matches.length} disponibles cerca de {zoneById(zoneId).name}.
+              </p>
+              <div className="mt-5 space-y-3.5">
+                {matches.map((p) => {
+                  const sel = selPro === p.id;
+                  return (
+                    <div key={p.id} className={`relative rounded-[20px] border-2 transition-all ${sel ? "border-pine shadow-lift" : "border-transparent"}`}>
+                      <button onClick={() => setSelPro(p.id)} className="absolute -top-1.5 -right-1.5 z-10 w-8 h-8 grid place-items-center rounded-full bg-pine text-white shadow-lift" aria-label={`Elegir a ${p.name}`}>
+                        <Icon name={sel ? "check" : "plus"} className="w-4 h-4" strokeWidth={2.8} />
+                      </button>
+                      <ProListItem p={p} onOpen={() => {}} onRequest={() => setSelPro(p.id)} />
+                    </div>
+                  );
+                })}
+                {matches.length === 0 && (
+                  <div className="card p-6 text-center">
+                    <p className="font-disp font-bold text-ink">No hay pros disponibles ahora</p>
+                    <p className="text-[0.8rem] text-mut font-medium mt-1">Crea la solicitud y te avisaremos cuando alguno acepte.</p>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </section>
+      )}
+
+      {/* bottom action */}
+      <div className="fixed bottom-0 inset-x-0 z-50 pb-[max(5.4rem,env(safe-area-inset-bottom))] pt-3 bg-gradient-to-t from-paper via-paper/90 to-transparent pointer-events-none">
+        <div className="max-w-2xl mx-auto px-5 pointer-events-auto flex gap-3">
+          {step > 0 && !(step === 1 && (initCat || prePro)) && (
+            <button onClick={() => setStep(step - 1)} className="btn-ghost h-14 px-5 text-[0.85rem] shrink-0">Atrás</button>
+          )}
+          {step < 4 ? (
+            <button onClick={() => setStep(step + 1)} disabled={!canNext} className="btn-pine flex-1 h-14 text-[0.92rem]">
+              Continuar <Icon name="arrow" className="w-4.5 h-4.5" strokeWidth={2.2} />
+            </button>
+          ) : (
+            <button onClick={submit} disabled={!canNext} className="btn-pine flex-1 h-14 text-[0.92rem]">
+              <Icon name={when === "quote" ? "doc" : "bolt"} className="w-5 h-5" strokeWidth={2.2} />
+              {when === "quote" ? "Enviar solicitud" : "Solicitar servicio"}
+            </button>
+          )}
         </div>
-      </section>
+      </div>
     </div>
   );
 }
 
-/* ─────────────────────────── TAB: FAVORITOS ─────────────────────────── */
+function SummaryRow({ l, v }: { l: string; v: string }) {
+  return (
+    <div className="flex gap-3 text-[0.82rem]">
+      <span className="w-24 shrink-0 font-bold text-soft">{l}</span>
+      <span className="flex-1 font-semibold text-ink">{v}</span>
+    </div>
+  );
+}
+
+/* ════════════════ TRACKING ════════════════ */
+const STATUS_STEPS = [
+  { k: "accepted", l: "Solicitud aceptada", ic: "check" },
+  { k: "enroute", l: "En camino", ic: "car" },
+  { k: "arrived", l: "Llegó", ic: "pin" },
+  { k: "started", l: "Servicio iniciado", ic: "wrench" },
+  { k: "done", l: "Servicio completado", ic: "star" },
+] as const;
+
+function Timeline({ status }: { status: string }) {
+  const order = ["accepted", "enroute", "arrived", "started", "done"];
+  const idx = order.indexOf(status);
+  return (
+    <div className="space-y-0">
+      {STATUS_STEPS.map((s, i) => {
+        const done = i < idx;
+        const active = i === idx;
+        return (
+          <div key={s.k} className="flex gap-3.5">
+            <div className="flex flex-col items-center">
+              <span className={`w-8 h-8 rounded-full grid place-items-center shrink-0 transition-all duration-300 ${done ? "bg-pine text-white" : active ? "bg-sun text-[#33230a] shadow-lift" : "bg-tint text-soft border border-line"}`}>
+                {done ? <Icon name="check" className="w-3.5 h-3.5" strokeWidth={3} /> : <Icon name={s.ic as never} className="w-4 h-4" strokeWidth={2.2} />}
+              </span>
+              {i < STATUS_STEPS.length - 1 && <span className={`w-[2.5px] h-7 rounded-full ${done ? "bg-pine" : "bg-line"}`} />}
+            </div>
+            <p className={`pt-1.5 text-[0.82rem] font-bold ${done ? "text-ink" : active ? "text-ink" : "text-soft"}`}>
+              {s.l}
+              {active && <span className="ml-2 text-[0.64rem] font-extrabold text-sun2 bg-sunsoft rounded-full px-2 py-0.5 uppercase tracking-wide">ahora</span>}
+            </p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export function TrackingView({ jobId, go, jump }: { jobId: string; go: (v: View) => void; jump: (t: "jobs") => void }) {
+  const s = useApp();
+  const job = s.jobs.find((j) => j.id === jobId);
+  const [rating, setRating] = useState(0);
+  const [hover, setHover] = useState(0);
+  const [text, setText] = useState("");
+  const [sent, setSent] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
+
+  useEffect(() => { window.scrollTo({ top: 0 }); }, [job?.status]);
+  if (!job) return null;
+  const pro = job.proId ? proById(job.proId) : null;
+  const cat = catById(job.catId);
+  const searching = job.status === "searching";
+  const moving = job.status === "enroute";
+
+  return (
+    <div className="max-w-2xl mx-auto px-5 pb-32">
+      <header className="sticky top-0 z-40 bg-paper/90 backdrop-blur-md pt-3 pb-3 border-b border-line2 -mx-5 px-5">
+        <div className="flex items-center gap-3">
+          <button onClick={() => jump("jobs")} className="w-10 h-10 grid place-items-center rounded-full card shrink-0" aria-label="Mis solicitudes">
+            <Icon name="chevl" className="w-4.5 h-4.5" strokeWidth={2.4} />
+          </button>
+          <div className="min-w-0 flex-1">
+            <p className="font-disp font-bold text-[1rem] text-ink leading-tight truncate">{cat.name}</p>
+            <p className="text-[0.68rem] text-soft font-bold truncate">{job.problem}</p>
+          </div>
+          <span className={`shrink-0 text-[0.64rem] font-extrabold uppercase tracking-wide rounded-full px-2.5 py-1 ${searching ? "bg-sunsoft text-sun2" : job.status === "done" ? "bg-oksoft text-ok" : "bg-pinesoft text-pine"}`}>
+            {searching ? "Buscando" : job.status === "done" ? "Completado" : "En curso"}
+          </span>
+        </div>
+      </header>
+
+      {/* searching */}
+      {searching && (
+        <section className="mt-14 flex flex-col items-center text-center animate-fadein">
+          <Radar />
+          <h2 className="font-disp font-bold text-[1.5rem] text-ink mt-7">Buscando profesionales…</h2>
+          <p className="text-[0.88rem] text-mut font-medium mt-2 max-w-xs leading-relaxed">
+            Estamos avisando a los pros de <strong className="text-ink">{cat.name}</strong> cerca de {zoneById(job.zoneId).name}.
+          </p>
+          <button onClick={() => jump("jobs")} className="btn-ghost h-11 px-5 text-[0.8rem] mt-8">Volver a mis solicitudes</button>
+        </section>
+      )}
+
+      {/* quoted */}
+      {job.status === "quoted" && (
+        <section className="mt-8 animate-fadein">
+          <h2 className="font-disp font-bold text-[1.4rem] text-ink">Cotización enviada</h2>
+          <p className="text-[0.85rem] text-mut font-medium mt-1">Recibirás propuestas de hasta 5 profesionales. Te avisaremos aquí.</p>
+          <div className="card p-5 mt-5 space-y-3">
+            <SummaryRow l="Servicio" v={cat.name} />
+            <SummaryRow l="Problema" v={job.problem} />
+            <SummaryRow l="Ubicación" v={zoneById(job.zoneId).name} />
+          </div>
+          <button onClick={() => jump("jobs")} className="btn-pine w-full h-13 py-3.5 text-[0.88rem] mt-6">Entendido</button>
+        </section>
+      )}
+
+      {/* active / done */}
+      {!searching && job.status !== "quoted" && (
+        <>
+          {/* map */}
+          <FadeUp>
+            <div className="mt-5"><MapCard moving={moving} label={zoneById(job.zoneId).name} /></div>
+          </FadeUp>
+
+          {/* pro card + ETA */}
+          {pro && (
+            <FadeUp d={80}>
+              <section className="card p-6 mt-5">
+                <div className="flex items-center gap-4">
+                  <div className="relative shrink-0">
+                    <Face face={pro.face} name={pro.name} size="w-20 h-20" />
+                    <span className="absolute bottom-0.5 right-0.5"><AvailDot /></span>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[0.66rem] font-extrabold uppercase tracking-[0.14em] text-pine">
+                      {job.status === "done" ? "Servicio completado" : moving ? "Tu profesional está en camino" : job.status === "arrived" ? "Tu profesional llegó" : job.status === "started" ? "Servicio en curso" : "Solicitud aceptada"}
+                    </p>
+                    <h2 className="font-disp font-bold text-[1.25rem] text-ink leading-tight mt-1 truncate">{pro.name}</h2>
+                    <p className="text-[0.78rem] text-mut font-semibold mt-0.5 flex items-center gap-1.5">
+                      <span className="inline-flex items-center gap-0.5 text-ink font-bold"><span className="text-sun">★</span>{pro.rating.toFixed(1)}</span>
+                      <Verif />
+                    </p>
+                  </div>
+                </div>
+
+                {moving && job.etaMin && (
+                  <div className="mt-5 rounded-2xl bg-pinesoft px-5 py-4 flex items-center justify-between">
+                    <div>
+                      <p className="text-[0.66rem] font-extrabold uppercase tracking-[0.14em] text-pine">Llegada estimada</p>
+                      <p className="font-disp font-bold text-[2rem] text-ink leading-none mt-1">{job.etaMin} <span className="text-[1rem]">min</span></p>
+                    </div>
+                    <span className="w-12 h-12 rounded-2xl bg-pine text-white grid place-items-center animate-ride">
+                      <Icon name="car" className="w-6 h-6" strokeWidth={1.8} />
+                    </span>
+                  </div>
+                )}
+
+                {(job.status === "arrived" || job.status === "started") && (
+                  <div className="mt-5 rounded-2xl bg-oksoft px-5 py-4 flex items-center gap-3">
+                    <span className="w-10 h-10 rounded-full bg-ok text-white grid place-items-center shrink-0"><Icon name="check" className="w-5 h-5" strokeWidth={2.6} /></span>
+                    <p className="text-[0.88rem] font-bold text-ok">{job.status === "arrived" ? "Tu profesional llegó a tu ubicación" : "El servicio está en curso"}</p>
+                  </div>
+                )}
+
+                <div className="flex gap-3 mt-5">
+                  <button className="btn-ghost flex-1 h-12 text-[0.82rem]"><Icon name="phone" className="w-4 h-4" strokeWidth={2.2} /> Contactar</button>
+                  {job.status !== "done" && job.status !== "started" && (
+                    <button onClick={() => setCancelOpen(true)} className="btn-ghost flex-1 h-12 text-[0.82rem] text-cor border-cor/30 hover:border-cor/60">Cancelar</button>
+                  )}
+                </div>
+              </section>
+            </FadeUp>
+          )}
+
+          {/* timeline */}
+          <FadeUp d={140}>
+            <section className="card p-6 mt-5">
+              <p className="text-[0.68rem] font-extrabold tracking-[0.18em] text-soft uppercase mb-4">Estado del servicio</p>
+              <Timeline status={job.status} />
+              {job.status !== "done" && (
+                <button onClick={() => advanceJob(job.id)} className="w-full mt-5 text-[0.72rem] font-bold text-soft hover:text-pine underline underline-offset-4 transition-colors">
+                  Avanzar demo → siguiente estado
+                </button>
+              )}
+            </section>
+          </FadeUp>
+
+          {/* review */}
+          {job.status === "done" && (
+            <FadeUp d={200}>
+              <section className="card p-6 mt-5 border-pine/30">
+                {sent || job.rating ? (
+                  <div className="text-center py-4">
+                    <span className="w-14 h-14 rounded-full bg-oksoft text-ok grid place-items-center mx-auto"><Icon name="check" className="w-7 h-7" strokeWidth={2.4} /></span>
+                    <h3 className="font-disp font-bold text-[1.2rem] text-ink mt-4">¡Gracias por tu reseña!</h3>
+                    <p className="text-[0.82rem] text-mut font-medium mt-1">Ayudaste a otros a elegir con confianza.</p>
+                    <button onClick={() => go({ t: "home" })} className="btn-pine h-12 px-6 text-[0.85rem] mt-6">Volver al inicio</button>
+                  </div>
+                ) : (
+                  <>
+                    <h3 className="font-disp font-bold text-[1.2rem] text-ink">¿Cómo lo hizo {pro?.name.split(" ")[0]}?</h3>
+                    <p className="text-[0.82rem] text-mut font-medium mt-1">Tu reseña está vinculada a un servicio real.</p>
+                    <div className="flex justify-center gap-2 mt-5">
+                      {[1, 2, 3, 4, 5].map((i) => (
+                        <button key={i} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(0)} onClick={() => setRating(i)} className="transition-transform active:scale-90" aria-label={`${i} estrellas`}>
+                          <svg viewBox="0 0 24 24" className={`w-10 h-10 transition-colors ${i <= (hover || rating) ? "text-sun" : "text-line"}`} fill="currentColor">
+                            <path d="m12 3.2 2.6 5.4 5.9.8-4.3 4.1 1 5.9-5.2-2.8-5.2 2.8 1-5.9L3.5 9.4l5.9-.8L12 3.2Z" />
+                          </svg>
+                        </button>
+                      ))}
+                    </div>
+                    <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="Cuéntanos cómo fue el servicio…" rows={3} className="mt-4 w-full card p-4 text-[0.88rem] font-medium text-ink placeholder:text-soft outline-none focus:border-pine/50 resize-none" />
+                    <button onClick={() => { rateJob(job.id, rating, text); setSent(true); }} disabled={!rating} className="btn-pine w-full h-13 py-3.5 text-[0.88rem] mt-4">
+                      Enviar reseña
+                    </button>
+                  </>
+                )}
+              </section>
+            </FadeUp>
+          )}
+        </>
+      )}
+
+      {/* cancel sheet */}
+      {cancelOpen && (
+        <div className="fixed inset-0 z-[70] grid place-items-center p-6">
+          <button className="absolute inset-0 bg-ink/45 backdrop-blur-[2px] animate-fadein" onClick={() => setCancelOpen(false)} aria-label="Cerrar" />
+          <div className="relative card p-6 max-w-sm w-full animate-pop">
+            <h3 className="font-disp font-bold text-[1.15rem] text-ink">¿Cancelar solicitud?</h3>
+            <p className="text-[0.82rem] text-mut font-medium mt-2 leading-relaxed">Si el profesional ya va en camino, cancelar podría generar un cargo en el futuro.</p>
+            <div className="flex gap-3 mt-5">
+              <button onClick={() => setCancelOpen(false)} className="btn-ghost flex-1 h-12 text-[0.85rem]">Seguir</button>
+              <button onClick={() => { setCancelOpen(false); jump("jobs"); }} className="flex-1 h-12 rounded-[14px] bg-cor text-white font-bold text-[0.85rem] active:scale-95 transition-transform">Cancelar servicio</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ════════════════ SOLICITUDES (tab) ════════════════ */
+export function RequestsTab({ go }: { go: (v: View) => void }) {
+  const s = useApp();
+  const loading = useFakeLoad(450);
+  const active = s.jobs.filter((j) => j.status !== "done" || !j.rating);
+  const done = s.jobs.filter((j) => j.status === "done" && j.rating);
+
+  return (
+    <div className="max-w-2xl mx-auto px-5 pb-10">
+      <h1 className="font-disp font-bold text-[1.5rem] text-ink pt-6">Mis solicitudes</h1>
+      {loading ? (
+        <div className="space-y-3.5 mt-5">
+          {[0, 1].map((i) => (
+            <div key={i} className="card p-5"><div className="skel h-4 w-1/2" /><div className="skel h-3 w-2/3 mt-3" /><div className="skel h-9 w-full mt-4" /></div>
+          ))}
+        </div>
+      ) : s.jobs.length === 0 ? (
+        <div className="text-center py-24">
+          <span className="w-16 h-16 rounded-2xl bg-pinesoft text-pine grid place-items-center mx-auto"><Icon name="doc" className="w-8 h-8" strokeWidth={1.7} /></span>
+          <p className="font-disp font-bold text-[1.1rem] text-ink mt-5">Aún no tienes solicitudes</p>
+          <p className="text-[0.85rem] text-mut font-medium mt-1">Pide tu primer servicio y síguelo en tiempo real.</p>
+          <button onClick={() => go({ t: "home" })} className="btn-pine h-12 px-6 text-[0.85rem] mt-6">Explorar servicios</button>
+        </div>
+      ) : (
+        <div className="mt-5 space-y-6">
+          {active.length > 0 && (
+            <section>
+              <p className="text-[0.68rem] font-extrabold tracking-[0.18em] text-soft uppercase mb-3">En curso</p>
+              <div className="space-y-3.5">
+                {active.map((j) => (
+                  <JobCard key={j.id} jobId={j.id} go={go} />
+                ))}
+              </div>
+            </section>
+          )}
+          {done.length > 0 && (
+            <section>
+              <p className="text-[0.68rem] font-extrabold tracking-[0.18em] text-soft uppercase mb-3">Completadas</p>
+              <div className="space-y-3.5">
+                {done.map((j) => (
+                  <JobCard key={j.id} jobId={j.id} go={go} />
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function JobCard({ jobId, go }: { jobId: string; go: (v: View) => void }) {
+  const s = useApp();
+  const j = s.jobs.find((x) => x.id === jobId)!;
+  const cat = catById(j.catId);
+  const pro = j.proId ? proById(j.proId) : null;
+  const label = j.status === "searching" ? "Buscando pro…" : j.status === "accepted" ? "Aceptada" : j.status === "enroute" ? "En camino" : j.status === "arrived" ? "Llegó" : j.status === "started" ? "En curso" : j.status === "quoted" ? "Cotizando" : "Completada";
+  const active = j.status !== "done";
+  return (
+    <button onClick={() => go({ t: "track", jobId: j.id })} className="w-full card card-h p-5 text-left">
+      <div className="flex items-center gap-3.5">
+        <span className="w-11 h-11 rounded-xl bg-pinesoft text-pine grid place-items-center shrink-0">
+          <Icon name={cat.icon as never} className="w-5.5 h-5.5" strokeWidth={1.8} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="font-disp font-bold text-[0.95rem] text-ink truncate">{cat.name}</p>
+          <p className="text-[0.72rem] text-mut font-semibold truncate mt-0.5">{j.problem}</p>
+        </div>
+        <span className={`shrink-0 text-[0.64rem] font-extrabold uppercase tracking-wide rounded-full px-2.5 py-1 ${active ? (j.status === "searching" ? "bg-sunsoft text-sun2" : "bg-pinesoft text-pine") : "bg-oksoft text-ok"}`}>
+          {label}
+        </span>
+      </div>
+      {pro && (
+        <div className="flex items-center gap-2.5 mt-3.5 pt-3.5 border-t border-line2">
+          <Face face={pro.face} name={pro.name} size="w-8 h-8" />
+          <p className="text-[0.78rem] font-bold text-ink">{pro.name}</p>
+          <span className="text-[0.72rem] text-mut font-semibold inline-flex items-center gap-0.5"><span className="text-sun">★</span>{pro.rating.toFixed(1)}</span>
+          <Icon name="chevr" className="w-4 h-4 text-soft ml-auto" strokeWidth={2.4} />
+        </div>
+      )}
+    </button>
+  );
+}
+
+/* ════════════════ FAVORITOS (tab) ════════════════ */
 export function FavoritesTab({ go }: { go: (v: View) => void }) {
   const s = useApp();
   const favs = s.favorites.map((id) => proById(id));
   return (
-    <div className="max-w-5xl mx-auto px-5 pb-10">
-      <header className="pt-6 pb-4">
-        <h1 className="font-disp font-bold text-2xl">Tus favoritos</h1>
-        <p className="text-mut text-sm mt-0.5">Los pros que ya conoces y recomiendas</p>
-      </header>
+    <div className="max-w-2xl mx-auto px-5 pb-10">
+      <h1 className="font-disp font-bold text-[1.5rem] text-ink pt-6">Favoritos</h1>
+      <p className="text-[0.85rem] text-mut font-medium mt-1">Tus profesionales de confianza, a un toque.</p>
       {favs.length === 0 ? (
-        <div className="card p-10 text-center">
-          <span className="text-5xl">💚</span>
-          <p className="font-disp font-bold text-lg mt-4">Guarda a tus profesionales de confianza</p>
-          <p className="text-sm text-mut mt-1 max-w-xs mx-auto">Toca el corazón en cualquier perfil para tenerlos a un toque la próxima vez.</p>
-          <button onClick={() => go({ t: "explore" })} className="btn-prime h-12 px-6 mt-5 text-sm">Explorar profesionales</button>
+        <div className="text-center py-24">
+          <span className="w-16 h-16 rounded-2xl bg-corsoft text-cor grid place-items-center mx-auto"><Icon name="heart" className="w-8 h-8" strokeWidth={1.7} /></span>
+          <p className="font-disp font-bold text-[1.1rem] text-ink mt-5">Sin favoritos todavía</p>
+          <p className="text-[0.85rem] text-mut font-medium mt-1">Guarda a los pros que te gusten para pedirles rápido.</p>
         </div>
       ) : (
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {favs.map((p) => (
-            <div key={p.id} className="card card-h p-4 flex flex-col">
-              <div className="flex items-start justify-between">
-                <Face face={p.face} name={p.name} size="w-14 h-14" ring />
-                <FavBtn id={p.id} />
-              </div>
-              <button onClick={() => go({ t: "pro", id: p.id })} className="text-left mt-3">
-                <p className="font-disp font-bold">{p.name}</p>
-                <p className="text-xs text-mut font-semibold mt-0.5">{p.tagline}</p>
-              </button>
-              <div className="flex items-center gap-1.5 mt-2 text-xs"><Stars n={p.rating} size="w-3 h-3" /><span className="font-bold">{p.rating}</span><span className="text-mut2">({p.reviews})</span></div>
-              <div className="flex gap-2 mt-4 pt-3 border-t border-edge2">
-                <button onClick={() => go({ t: "pro", id: p.id })} className="btn-ghost flex-1 h-10 text-xs">Perfil</button>
-                <button onClick={() => go({ t: "request", proId: p.id })} className="btn-prime flex-1 h-10 text-xs">Solicitar</button>
-              </div>
-            </div>
+        <div className="mt-5 space-y-3.5">
+          {favs.map((p, i) => (
+            <ProListItem
+              key={p.id} p={p} delay={i * 60}
+              fav onFav={() => toggleFav(p.id)}
+              onOpen={() => go({ t: "pro", id: p.id })}
+              onRequest={() => go({ t: "request", proId: p.id })}
+            />
           ))}
         </div>
       )}
@@ -658,71 +600,49 @@ export function FavoritesTab({ go }: { go: (v: View) => void }) {
   );
 }
 
-/* ─────────────────────────── TAB: PERFIL ─────────────────────────── */
+/* ════════════════ PERFIL (tab) ════════════════ */
 export function MeTab({ go, jump }: { go: (v: View) => void; jump: (t: "jobs") => void }) {
   const s = useApp();
+  const doneCount = s.jobs.filter((j) => j.status === "done").length;
   return (
-    <div className="max-w-xl mx-auto px-5 pb-10">
-      <header className="pt-6 pb-2"><h1 className="font-disp font-bold text-2xl">Tu cuenta</h1></header>
-
-      <FadeUp>
-        <div className="card p-5 flex items-center gap-4">
-          <Face face={{ f: 3, q: 3 }} name="María Peralta" size="w-16 h-16" />
-          <div className="flex-1">
-            <p className="font-disp font-bold text-lg">María Peralta</p>
-            <p className="text-sm text-mut font-semibold">+1 809 555 0142 · ★ 4.8 como cliente</p>
-            <p className="text-xs text-mut2 font-bold mt-1 inline-flex items-center gap-1"><Icon name="pin" className="w-3 h-3" strokeWidth={2.4} /> {zoneById(s.zoneId).name}, Santiago</p>
-          </div>
-          <button className="btn-ghost h-10 px-4 text-xs" onClick={() => setZone(s.zoneId === "cerros" ? "jardines" : "cerros")}>Cambiar</button>
+    <div className="max-w-2xl mx-auto px-5 pb-10">
+      <h1 className="font-disp font-bold text-[1.5rem] text-ink pt-6">Mi perfil</h1>
+      <section className="card p-6 mt-5 flex items-center gap-4">
+        <Face face={{ f: 3, q: 3 }} name="María Peralta" size="w-16 h-16" />
+        <div>
+          <p className="font-disp font-bold text-[1.15rem] text-ink">María Peralta</p>
+          <p className="text-[0.78rem] text-mut font-semibold mt-0.5">{zoneById(s.zoneId).name} · Santiago</p>
+          <p className="text-[0.7rem] text-soft font-bold mt-1">{doneCount} servicios · miembro nuevo</p>
         </div>
-      </FadeUp>
+      </section>
 
-      <FadeUp d={90}>
-        <div className="grid grid-cols-3 gap-px bg-edge2 rounded-2xl overflow-hidden border border-edge2 mt-4">
-          {[
-            { v: String(s.jobs.length + HISTORY.length), l: "solicitudes" },
-            { v: String(s.favorites.length), l: "favoritos" },
-            { v: "4", l: "reseñas dadas" },
-          ].map((x) => (
-            <div key={x.l} className="bg-card px-3 py-4 text-center">
-              <p className="font-disp font-bold text-2xl text-grn">{x.v}</p>
-              <p className="text-[0.62rem] font-bold text-mut uppercase tracking-wide">{x.l}</p>
-            </div>
-          ))}
-        </div>
-      </FadeUp>
+      <section className="card mt-4 divide-y divide-line2">
+        {[
+          { ic: "pin", l: "Mis direcciones", fn: () => {} },
+          { ic: "clip", l: "Historial de servicios", fn: () => jump("jobs") },
+          { ic: "heart", l: "Favoritos", fn: () => jump("favs" as never) },
+          { ic: "shield", l: "Seguridad y privacidad", fn: () => {} },
+        ].map((r) => (
+          <button key={r.l} onClick={r.fn} className="w-full flex items-center gap-3.5 px-5 py-4 text-left hover:bg-tint/50 transition-colors">
+            <span className="w-9 h-9 rounded-xl bg-tint text-mut grid place-items-center shrink-0"><Icon name={r.ic as never} className="w-4.5 h-4.5" strokeWidth={2} /></span>
+            <span className="flex-1 text-[0.88rem] font-bold text-ink">{r.l}</span>
+            <Icon name="chevr" className="w-4 h-4 text-soft" strokeWidth={2.4} />
+          </button>
+        ))}
+      </section>
 
-      <FadeUp d={140}>
-        <button onClick={() => setRole("pro")} className="w-full card card-h p-5 mt-4 flex items-center gap-4 text-left group">
-          <span className="w-13 h-13 rounded-2xl bg-grn text-white grid place-items-center shrink-0 py-3 px-3 group-hover:scale-105 transition-transform">
-            <Icon name="wrench" className="w-6 h-6" strokeWidth={1.8} />
-          </span>
-          <span className="flex-1">
-            <span className="block font-disp font-bold">Cambiar a modo profesional</span>
-            <span className="block text-sm text-mut font-semibold mt-0.5">Revisa solicitudes, gana clientes y gestiona tu disponibilidad</span>
-          </span>
-          <Icon name="chevr" className="w-5 h-5 text-mut2" strokeWidth={2.2} />
-        </button>
-      </FadeUp>
+      <button onClick={() => setRole("pro")} className="w-full card card-h mt-4 p-5 flex items-center gap-4 text-left border-pine/30">
+        <span className="w-11 h-11 rounded-xl bg-pine text-white grid place-items-center shrink-0"><Icon name="wrench" className="w-5.5 h-5.5" strokeWidth={1.8} /></span>
+        <span className="flex-1">
+          <span className="block font-disp font-bold text-[0.95rem] text-ink">¿Eres profesional?</span>
+          <span className="block text-[0.74rem] text-mut font-semibold">Cambia al modo profesional y consigue clientes</span>
+        </span>
+        <Icon name="arrow" className="w-4.5 h-4.5 text-pine shrink-0" strokeWidth={2.2} />
+      </button>
 
-      <FadeUp d={180}>
-        <div className="card mt-4 divide-y divide-edge2">
-          {[
-            { icon: "clip", l: "Historial de servicios", fn: () => jump("jobs") },
-            { icon: "heart", l: "Favoritos", fn: () => go({ t: "home" }) },
-            { icon: "shield", l: "Seguridad y privacidad", fn: () => undefined },
-            { icon: "doc", l: "Blueprint técnico V1 (doc interna)", fn: () => { window.location.hash = "#/docs"; } },
-          ].map((r) => (
-            <button key={r.l} onClick={r.fn} className="w-full flex items-center gap-3.5 px-5 py-4 text-left hover:bg-tint/60 transition-colors">
-              <Icon name={r.icon as never} className="w-5 h-5 text-mut" strokeWidth={1.9} />
-              <span className="flex-1 font-bold text-sm">{r.l}</span>
-              <Icon name="chevr" className="w-4 h-4 text-mut2" strokeWidth={2.2} />
-            </button>
-          ))}
-        </div>
-      </FadeUp>
-
-      <p className="text-center text-[0.65rem] text-mut2 font-bold mt-6">AlToque · prototipo navegable v0.1 · Santiago de los Caballeros 🇩🇴</p>
+      <p className="text-center text-[0.66rem] text-soft font-semibold mt-8">
+        Altoque · hecho en Santiago, RD
+      </p>
     </div>
   );
 }

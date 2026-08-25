@@ -362,7 +362,11 @@ export function createJob(data: { catId: string; problem: string; photos: number
   if (data.when === "now") {
     spawnInbox(id); // la solicitud también llega al inbox del proveedor de la demo
     // cadena simulada: aceptación → en camino → llegada → inicio → fin
-    const best = data.proId ? proById(data.proId) : prosByCat(data.catId).filter((p) => p.available).sort((a, b) => b.rating - a.rating)[0] ?? PROS[0];
+    const best = data.proId
+      ? proById(data.proId)
+      : prosByCat(data.catId).filter((p) => p.available).sort((a, b) => b.rating - a.rating)[0]
+        ?? prosByCat(data.catId).sort((a, b) => b.rating - a.rating)[0]
+        ?? PROS[0];
     later(id, 6500, () => {
       patchJob(id, { status: "accepted", proId: best.id, etaMin: best.eta, etaLeft: best.eta * 60 });
       toast(`${best.name.split(" ")[0]} aceptó tu solicitud`);

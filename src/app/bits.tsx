@@ -1,8 +1,20 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Icon, type IconName } from "../components/icons";
-import { faceUrl, fmt, proById, quadPos, zoneById, type Pro } from "./store";
+import { useEffect, useState, type ReactNode } from "react";
+import { Icon } from "../components/icons";
+import { catById, faceUrl, jobUrl, quadPos, type Pro } from "./store";
 
-/* ── animación de entrada suave ── */
+/* ── reduced motion ── */
+export function useReducedMotion() {
+  const [rm, setRm] = useState(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const h = () => setRm(mq.matches);
+    mq.addEventListener("change", h);
+    return () => mq.removeEventListener("change", h);
+  }, []);
+  return rm;
+}
+
+/* ── entrance animation ── */
 export function FadeUp({ children, d = 0, className = "" }: { children: ReactNode; d?: number; className?: string }) {
   return (
     <div className={`animate-rise ${className}`} style={{ animationDelay: `${d}ms` }}>
@@ -11,342 +23,366 @@ export function FadeUp({ children, d = 0, className = "" }: { children: ReactNod
   );
 }
 
-/* ── carga simulada (skeletons) ── */
+/* ── fake loading hook ── */
 export function useFakeLoad(ms = 700) {
   const [loading, setLoading] = useState(true);
-  useEffect(() => { const t = setTimeout(() => setLoading(false), ms); return () => clearTimeout(t); }, [ms]);
+  useEffect(() => {
+    const t = setTimeout(() => setLoading(false), ms);
+    return () => clearTimeout(t);
+  }, [ms]);
   return loading;
 }
 
-/* ── avatar fotográfico (recorte de cuadrícula 2×2) ── */
-export function Face({ face, name, size = "w-12 h-12", rounded = "rounded-full", ring = false }: { face: { f: number; q: number }; name: string; size?: string; rounded?: string; ring?: boolean }) {
+/* ── avatar with real photo (quadrant crop) + initials fallback ── */
+export function Face({ face, name, size = "w-12 h-12", className = "" }: { face: { f: number; q: number }; name: string; size?: string; className?: string }) {
   const [err, setErr] = useState(false);
   const initials = name.split(" ").map((w) => w[0]).slice(0, 2).join("");
-  return (
-    <span className={`relative shrink-0 overflow-hidden ${size} ${rounded} ${ring ? "ring-2 ring-white shadow-md" : ""}`}>
-      {err ? (
-        <span className="absolute inset-0 grid place-items-center font-disp font-bold text-white bg-grn text-sm">{initials}</span>
-      ) : (
-        <img
-          src={faceUrl(face.f)}
-          alt={name}
-          className="absolute w-[200%] h-[200%] object-cover"
-          style={{ left: face.q % 2 === 1 ? "-100%" : "0", top: face.q >= 2 ? "-100%" : "0" }}
-          onError={() => setErr(true)}
-          draggable={false}
-        />
-      )}
-    </span>
-  );
-}
-
-/* ── estrellas ── */
-export function Stars({ n, size = "w-3.5 h-3.5", onSet }: { n: number; size?: string; onSet?: (v: number) => void }) {
-  return (
-    <span className="inline-flex items-center gap-0.5">
-      {[1, 2, 3, 4, 5].map((i) => (
-        <button
-          key={i}
-          type="button"
-          disabled={!onSet}
-          onClick={() => onSet?.(i)}
-          className={onSet ? "transition-transform duration-150 hover:scale-125 active:scale-95 cursor-pointer" : "cursor-default"}
-          aria-label={`${i} estrellas`}
-        >
-          <svg viewBox="0 0 24 24" className={`${size} ${i <= Math.round(n) ? "text-sun" : "text-edge"}`} fill="currentColor">
-            <path d="m12 3.2 2.6 5.4 5.9.8-4.3 4.1 1 5.9-5.2-2.8-5.2 2.8 1-5.9L3.5 9.4l5.9-.8L12 3.2Z" />
-          </svg>
-        </button>
-      ))}
-    </span>
-  );
-}
-
-/* ── insignias ── */
-export function Verif({ compact = false }: { compact?: boolean }) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-grnsoft text-grn pl-1.5 pr-2 py-0.5 text-[0.62rem] font-bold">
-      <Icon name="badge" className="w-3 h-3" strokeWidth={2.2} />
-      {compact ? "Verif." : "Verificado"}
-    </span>
-  );
-}
-
-export function AvailDot({ on, label = true, dark = false }: { on: boolean; label?: boolean; dark?: boolean }) {
-  return (
-    <span className={`inline-flex items-center gap-1.5 text-[0.68rem] font-bold ${on ? "text-grn" : dark ? "text-nmut" : "text-mut2"}`}>
-      <span className="relative flex w-2 h-2">
-        {on && <span className="absolute inset-0 rounded-full bg-grn animate-ping opacity-60 motion-reduce:hidden" />}
-        <span className={`relative rounded-full w-2 h-2 ${on ? "bg-grn" : "bg-mut2"}`} />
+  if (err) {
+    return (
+      <span className={`${size} ${className} rounded-full grid place-items-center bg-pinesoft text-pine font-disp font-bold text-sm shrink-0`}>
+        {initials}
       </span>
-      {label && (on ? "Disponible" : "No disponible")}
-    </span>
-  );
-}
-
-/* ── switch grande de disponibilidad ── */
-export function BigToggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+    );
+  }
   return (
-    <button
-      onClick={() => onChange(!on)}
-      role="switch"
-      aria-checked={on}
-      className={`relative w-[5.2rem] h-[2.9rem] rounded-full transition-colors duration-300 ${on ? "bg-grn" : "bg-nsurf border border-nline"}`}
-    >
+    <span className={`${size} ${className} relative rounded-full overflow-hidden bg-tint shrink-0 ring-2 ring-card`}>
       <span
-        className={`absolute top-1 w-[2.15rem] h-[2.15rem] rounded-full bg-white shadow-lg grid place-items-center transition-all duration-300 ease-[cubic-bezier(.2,1.2,.4,1)] ${on ? "left-[2.65rem]" : "left-1"}`}
-      >
-        <span className={`w-2 h-2 rounded-full ${on ? "bg-grn" : "bg-mut2"}`} />
-      </span>
-    </button>
+        className="absolute inset-0"
+        style={{
+          backgroundImage: `url(${faceUrl(face.f)})`,
+          backgroundSize: "200% 200%",
+          backgroundPosition: quadPos(face.q),
+        }}
+        role="img"
+        aria-label={name}
+      />
+      <img src={faceUrl(face.f)} alt="" className="hidden" onError={() => setErr(true)} />
+    </span>
   );
 }
 
-/* ── hoja inferior (sheet) ── */
-export function Sheet({ open, onClose, title, children, tall = false }: { open: boolean; onClose: () => void; title?: string; children: ReactNode; tall?: boolean }) {
-  useEffect(() => {
-    document.body.style.overflow = open ? "hidden" : "";
-    return () => { document.body.style.overflow = ""; };
-  }, [open]);
-  if (!open) return null;
+/* ── job / portfolio photo ── */
+export function JobPhoto({ i, className = "w-full h-full" }: { i: number; className?: string }) {
+  const [err, setErr] = useState(false);
+  if (err) return <span className={`${className} grid place-items-center bg-tint text-soft`}><Icon name="camera" className="w-6 h-6" /></span>;
   return (
-    <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center">
-      <button aria-label="Cerrar" onClick={onClose} className="absolute inset-0 bg-ink2/45 backdrop-blur-[2px] animate-fadein" />
-      <div className={`relative w-full sm:max-w-md bg-card sm:rounded-3xl rounded-t-3xl animate-slideup shadow-2xl ${tall ? "h-[88dvh]" : "max-h-[88dvh]"} overflow-hidden flex flex-col`}>
-        <div className="pt-3 pb-1 flex justify-center sm:hidden">
-          <span className="w-10 h-1.5 rounded-full bg-edge" />
-        </div>
-        {title && (
-          <div className="flex items-center justify-between px-5 pt-3 pb-2">
-            <h3 className="font-disp font-bold text-lg">{title}</h3>
-            <button onClick={onClose} className="w-8 h-8 grid place-items-center rounded-full bg-tint text-mut hover:bg-edge2 transition-colors" aria-label="Cerrar">
-              <Icon name="x" className="w-4 h-4" strokeWidth={2.4} />
-            </button>
-          </div>
-        )}
-        <div className="overflow-y-auto no-scrollbar px-5 pb-8 pt-2">{children}</div>
-      </div>
-    </div>
+    <img src={jobUrl(i)} alt="Trabajo realizado" className={`${className} object-cover`} onError={() => setErr(true)} loading="lazy" />
   );
 }
 
-/* ── mapa estilizado ── */
-export function MapCard({ zoneId, dark = false, h = "h-40", pin = true, label }: { zoneId: string; dark?: boolean; h?: string; pin?: boolean; label?: string }) {
-  const zone = zoneById(zoneId);
-  const seed = zoneId.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
-  const x = 30 + (seed % 40); const y = 25 + ((seed * 7) % 40);
+/* ── star rating ── */
+export function Stars({ n, size = "w-3.5 h-3.5" }: { n: number; size?: string }) {
   return (
-    <div className={`relative overflow-hidden rounded-2xl ${h} ${dark ? "mapgrid-dark" : "mapgrid"}`}>
-      <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden>
-        <path d={`M-5 ${30 + (seed % 20)} C 30 ${10 + (seed % 25)}, 60 ${70 - (seed % 20)}, 105 ${40 + (seed % 15)}`} fill="none" stroke={dark ? "rgba(233,240,234,.14)" : "rgba(12,95,70,.16)"} strokeWidth="4" />
-        <path d={`M${20 + (seed % 15)} -5 C ${35 + (seed % 10)} 35, ${25 + (seed % 12)} 70, ${45 + (seed % 10)} 105`} fill="none" stroke={dark ? "rgba(233,240,234,.1)" : "rgba(12,95,70,.12)"} strokeWidth="3" />
-        <circle cx={x} cy={y} r="7" fill={dark ? "rgba(255,179,0,.1)" : "rgba(12,95,70,.08)"} />
-      </svg>
-      {pin && (
-        <div className="absolute" style={{ left: `${x}%`, top: `${y}%`, transform: "translate(-50%,-100%)" }}>
-          <span className="relative block">
-            <span className="absolute -inset-3 rounded-full bg-grn/25 animate-radar motion-reduce:hidden" />
-            <Icon name="pin" className="w-7 h-7 text-grn drop-shadow-md relative" strokeWidth={2.2} />
-          </span>
-        </div>
-      )}
-      <span className={`absolute left-3 bottom-3 rounded-full px-3 py-1 text-[0.68rem] font-bold ${dark ? "bg-ncard/90 text-ntxt border border-nline" : "bg-white/90 text-ink2 border border-edge2 shadow-sm"}`}>
-        📍 {label ?? zone.name}
-      </span>
-    </div>
-  );
-}
-
-/* ── radar de búsqueda/en camino ── */
-export function Radar({ size = 180, children }: { size?: number; children?: ReactNode }) {
-  return (
-    <div className="relative grid place-items-center" style={{ width: size, height: size }}>
-      {[0, 1, 2].map((i) => (
-        <span
-          key={i}
-          className="absolute rounded-full border-2 border-grn/30 animate-radar motion-reduce:animate-none"
-          style={{ width: "100%", height: "100%", animationDelay: `${i * 0.8}s` }}
-        />
+    <span className="inline-flex items-center gap-[1px]" aria-label={`${n} de 5 estrellas`}>
+      {[1, 2, 3, 4, 5].map((i) => (
+        <svg key={i} viewBox="0 0 24 24" className={`${size} ${i <= Math.round(n) ? "text-sun" : "text-line"}`} fill="currentColor">
+          <path d="m12 3.2 2.6 5.4 5.9.8-4.3 4.1 1 5.9-5.2-2.8-5.2 2.8 1-5.9L3.5 9.4l5.9-.8L12 3.2Z" />
+        </svg>
       ))}
-      <span className="absolute rounded-full bg-grnsoft w-[62%] h-[62%] grid place-items-center">
-        <span className="rounded-full bg-white w-[74%] h-[74%] grid place-items-center shadow-lg overflow-hidden">{children}</span>
+    </span>
+  );
+}
+
+/* ── verified pill ── */
+export function Verif({ label = "Verificado" }: { label?: string }) {
+  return (
+    <span className="inline-flex items-center gap-1 text-pine font-bold text-[0.68rem]">
+      <span className="w-3.5 h-3.5 rounded-full bg-pine grid place-items-center">
+        <Icon name="check" className="w-2 h-2 text-white" strokeWidth={3.4} />
       </span>
+      {label}
+    </span>
+  );
+}
+
+/* ── availability dot ── */
+export function AvailDot({ pulse = true }: { pulse?: boolean }) {
+  return (
+    <span className="relative inline-flex w-2.5 h-2.5">
+      {pulse && <span className="absolute inset-0 rounded-full bg-ok animate-pulse-ring" />}
+      <span className="relative w-2.5 h-2.5 rounded-full bg-ok" />
+    </span>
+  );
+}
+
+/* ── section header ── */
+export function RowHead({ icon, title, sub, action }: { icon?: string; title: string; sub?: string; action?: { label: string; fn: () => void } }) {
+  return (
+    <div className="flex items-end justify-between gap-3 mb-4">
+      <div>
+        <h2 className="font-disp font-bold text-[1.15rem] leading-tight text-ink flex items-center gap-2">
+          {icon && (
+            <span className="w-7 h-7 rounded-lg bg-pinesoft text-pine grid place-items-center shrink-0">
+              <Icon name={icon as never} className="w-4 h-4" strokeWidth={2} />
+            </span>
+          )}
+          {title}
+        </h2>
+        {sub && <p className="text-[0.78rem] text-mut font-medium mt-0.5">{sub}</p>}
+      </div>
+      {action && (
+        <button onClick={action.fn} className="text-[0.78rem] font-bold text-pine hover:text-pine2 whitespace-nowrap flex items-center gap-1 shrink-0">
+          {action.label} <Icon name="chevr" className="w-3.5 h-3.5" strokeWidth={2.6} />
+        </button>
+      )}
     </div>
   );
 }
 
-/* ── tarjeta de profesional (carrusel) ── */
+/* ── horizontal scroller ── */
+export function Carousel({ children }: { children: ReactNode }) {
+  return <div className="flex gap-3.5 overflow-x-auto no-scrollbar -mx-5 px-5 sm:mx-0 sm:px-0 pb-1 snap-x">{children}</div>;
+}
+
+/* ── compact pro card (carousels) ── */
 export function ProCard({ p, onOpen, onRequest }: { p: Pro; onOpen: () => void; onRequest: () => void }) {
   return (
-    <div className="card card-h w-[15rem] shrink-0 p-4 flex flex-col text-left">
-      <div className="flex items-start justify-between">
-        <Face face={p.face} name={p.name} size="w-14 h-14" ring />
-        <div className="flex items-center gap-2">
-          <AvailDot on={p.available} label={false} />
-          <FavBtn id={p.id} />
+    <div className="card card-h snap-start shrink-0 w-[13.2rem] p-4 flex flex-col">
+      <button onClick={onOpen} className="text-left">
+        <div className="relative inline-block">
+          <Face face={p.face} name={p.name} size="w-14 h-14" />
+          {p.available && <span className="absolute -bottom-0.5 -right-0.5"><AvailDot /></span>}
         </div>
-      </div>
-      <button onClick={onOpen} className="text-left mt-3">
-        <p className="font-disp font-bold text-[1.02rem] leading-tight">{p.name}</p>
-        <p className="text-mut text-xs mt-0.5">{p.tagline}</p>
+        <p className="font-disp font-bold text-[0.95rem] mt-2.5 leading-tight">{p.name}</p>
+        <p className="text-[0.7rem] text-mut font-semibold mt-0.5 flex items-center gap-1">
+          <span className="text-sun">★</span> {p.rating.toFixed(1)}
+          <span className="text-soft">· {p.reviews} reseñas</span>
+        </p>
+        <p className="text-[0.7rem] text-mut font-medium mt-1 line-clamp-1">{p.cats[0] ? catById(p.cats[0]).name : ""}</p>
       </button>
-      <div className="flex items-center gap-1.5 mt-2 text-xs">
-        <Stars n={p.rating} size="w-3 h-3" />
-        <span className="font-bold">{p.rating}</span>
-        <span className="text-mut2">({p.reviews})</span>
-        <Verif compact />
-      </div>
-      <div className="flex items-center gap-3 mt-2 text-[0.7rem] text-mut font-semibold">
-        <span className="inline-flex items-center gap-1"><Icon name="pin" className="w-3.5 h-3.5 text-mut2" />{p.km} km</span>
-        <span className="inline-flex items-center gap-1"><Icon name="timer" className="w-3.5 h-3.5 text-mut2" />~{p.eta} min</span>
-        <span>{p.jobs} servicios</span>
-      </div>
-      <div className="flex gap-2 mt-4 pt-3 border-t border-edge2">
-        <button onClick={onOpen} className="btn-ghost flex-1 h-10 text-xs">Ver perfil</button>
-        <button onClick={onRequest} className="btn-prime flex-1 h-10 text-xs" disabled={!p.available}>
-          {p.available ? "Solicitar" : "Ocupado"}
-        </button>
+      <div className="mt-auto pt-3 flex items-center justify-between gap-2">
+        <span className="text-[0.68rem] font-bold text-mut">{p.km} km</span>
+        <button onClick={onRequest} className="btn-pine h-8 px-3.5 text-[0.72rem]">Solicitar</button>
       </div>
     </div>
   );
 }
 
-/* ── fila de profesional (resultados) ── */
-export function ProListItem({ p, onOpen, onRequest, delay = 0 }: { p: Pro; onOpen: () => void; onRequest: () => void; delay?: number }) {
+/* ── full-width pro list card (results, favoritos) ── */
+export function ProListItem({ p, onOpen, onRequest, delay = 0, fav, onFav }: { p: Pro; onOpen: () => void; onRequest: () => void; delay?: number; fav?: boolean; onFav?: () => void }) {
   return (
     <FadeUp d={delay}>
-      <div className={`card card-h p-4 flex gap-4 items-center ${!p.available ? "opacity-60" : ""}`}>
-        <button onClick={onOpen} className="relative shrink-0">
-          <Face face={p.face} name={p.name} size="w-16 h-16 sm:w-[4.5rem] sm:h-[4.5rem]" rounded="rounded-2xl" />
-          <span className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white ${p.available ? "bg-grn" : "bg-mut2"}`} />
+      <div className="card card-h p-4 flex gap-3.5">
+        <button onClick={onOpen} className="relative shrink-0 self-start" aria-label={`Ver perfil de ${p.name}`}>
+          <Face face={p.face} name={p.name} size="w-16 h-16" />
+          {p.available && <span className="absolute bottom-0 right-0"><AvailDot /></span>}
         </button>
-        <button onClick={onOpen} className="flex-1 text-left min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <p className="font-disp font-bold">{p.name}</p>
-            {p.founder && (
-              <span className="rounded-full bg-sunsoft text-[0.58rem] font-extrabold px-2 py-0.5 text-[#8a5a00]">FUNDADOR</span>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <button onClick={onOpen} className="text-left min-w-0">
+              <p className="font-disp font-bold text-[1rem] leading-tight truncate">{p.name}</p>
+              <p className="text-[0.74rem] text-mut font-semibold mt-0.5 flex items-center gap-1.5 flex-wrap">
+                <span className="inline-flex items-center gap-0.5 text-ink font-bold"><span className="text-sun">★</span>{p.rating.toFixed(1)}</span>
+                <span className="text-soft">({p.reviews})</span>
+                {p.verified.pro && <Verif />}
+              </p>
+            </button>
+            {onFav && (
+              <button onClick={onFav} className="shrink-0 w-8 h-8 grid place-items-center rounded-full hover:bg-tint transition-colors" aria-label="Favorito">
+                <Icon name="heart" className={`w-4.5 h-4.5 ${fav ? "text-cor fill-cor" : "text-soft"}`} strokeWidth={2} fill={fav ? "currentColor" : "none"} />
+              </button>
             )}
           </div>
-          <div className="flex items-center gap-1.5 mt-1 text-xs flex-wrap">
-            <Stars n={p.rating} size="w-3 h-3" />
-            <span className="font-bold">{p.rating}</span>
-            <span className="text-mut2">({p.reviews})</span>
-            <span className="text-edge">·</span>
-            <span className="text-mut font-semibold">{p.jobs} servicios</span>
-          </div>
-          <div className="flex items-center gap-2 mt-1.5 text-[0.68rem] text-mut font-semibold flex-wrap">
-            <Verif compact />
-            <span className="inline-flex items-center gap-1"><Icon name="pin" className="w-3 h-3 text-mut2" />{p.km} km</span>
-            <span className="inline-flex items-center gap-1 rounded-full bg-grnsoft text-grn px-2 py-0.5 font-bold">
-              <Icon name="timer" className="w-3 h-3" /> Llega ~{p.eta} min
+
+          <p className="text-[0.72rem] text-mut font-medium mt-1 line-clamp-1">{p.tagline}</p>
+
+          <div className="flex items-center gap-2 flex-wrap mt-2">
+            {p.available ? (
+              <span className="inline-flex items-center gap-1.5 text-[0.68rem] font-bold text-ok bg-oksoft rounded-full px-2 py-0.5">
+                <AvailDot pulse={false} /> Disponible · llega en ~{p.eta} min
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 text-[0.68rem] font-bold text-soft bg-tint rounded-full px-2 py-0.5">
+                <span className="w-2 h-2 rounded-full bg-soft" /> Ocupado
+              </span>
+            )}
+            <span className="text-[0.68rem] font-bold text-mut inline-flex items-center gap-1">
+              <Icon name="pin" className="w-3 h-3" strokeWidth={2.4} /> {p.km} km
             </span>
-            <span>desde {fmt(p.price)}</span>
           </div>
-        </button>
-        <div className="flex flex-col gap-2 shrink-0">
-          <button onClick={onRequest} className="btn-prime px-4 h-11 text-sm" disabled={!p.available}>
-            {p.available ? "Solicitar" : "Ocupado"}
-          </button>
-          <FavBtn id={p.id} />
+
+          <div className="flex items-center justify-between gap-2 mt-3">
+            <span className="text-[0.7rem] font-bold text-ink">
+              desde <span className="font-disp">RD${p.price.toLocaleString()}</span>
+            </span>
+            <button onClick={onRequest} disabled={!p.available} className="btn-pine h-9 px-4 text-[0.74rem] disabled:opacity-40 disabled:shadow-none">
+              Solicitar
+            </button>
+          </div>
         </div>
       </div>
     </FadeUp>
   );
 }
 
-export function FavBtn({ id, className = "" }: { id: string; className?: string }) {
-  const { favorites, toggleFav } = useFav();
-  const on = favorites.includes(id);
+/* ── skeletons ── */
+export function SkelCards({ n = 4 }: { n?: number }) {
+  return (
+    <div className="flex gap-3.5 overflow-hidden -mx-5 px-5 sm:mx-0 sm:px-0">
+      {Array.from({ length: n }).map((_, i) => (
+        <div key={i} className="shrink-0 w-[13.2rem] p-4 card">
+          <div className="skel w-14 h-14 rounded-full" />
+          <div className="skel h-4 w-3/4 mt-3" />
+          <div className="skel h-3 w-1/2 mt-2" />
+          <div className="skel h-8 w-full mt-4" />
+        </div>
+      ))}
+    </div>
+  );
+}
+export function SkelList({ n = 4 }: { n?: number }) {
+  return (
+    <div className="space-y-3.5">
+      {Array.from({ length: n }).map((_, i) => (
+        <div key={i} className="card p-4 flex gap-3.5">
+          <div className="skel w-16 h-16 rounded-full shrink-0" />
+          <div className="flex-1">
+            <div className="skel h-4 w-1/2" />
+            <div className="skel h-3 w-2/3 mt-2.5" />
+            <div className="skel h-3 w-1/3 mt-2.5" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ── bottom sheet ── */
+export function Sheet({ open, onClose, title, children }: { open: boolean; onClose: () => void; title?: string; children: ReactNode }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[70]">
+      <button className="absolute inset-0 bg-ink/45 backdrop-blur-[2px] animate-fadein" onClick={onClose} aria-label="Cerrar" />
+      <div className="absolute inset-x-0 bottom-0 animate-slideup">
+        <div className="mx-auto max-w-md bg-card rounded-t-[26px] border-t border-x border-line2 shadow-lift max-h-[82vh] overflow-y-auto no-scrollbar">
+          <div className="sticky top-0 bg-card pt-3 pb-2 px-5 border-b border-line2">
+            <span className="mx-auto block w-10 h-1 rounded-full bg-line mb-3" />
+            <div className="flex items-center justify-between">
+              {title && <h3 className="font-disp font-bold text-lg text-ink">{title}</h3>}
+              <button onClick={onClose} className="ml-auto w-8 h-8 grid place-items-center rounded-full bg-tint text-mut" aria-label="Cerrar">
+                <Icon name="x" className="w-4 h-4" strokeWidth={2.4} />
+              </button>
+            </div>
+          </div>
+          <div className="p-5">{children}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── big toggle switch ── */
+export function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label?: string }) {
   return (
     <button
-      onClick={(e) => { e.stopPropagation(); toggleFav(id); }}
-      aria-label={on ? "Quitar de favoritos" : "Guardar en favoritos"}
-      className={`w-9 h-9 grid place-items-center rounded-full border transition-all duration-200 active:scale-90 ${on ? "bg-firesoft border-fire/30 text-fire" : "bg-card border-edge2 text-mut2 hover:text-fire"} ${className}`}
+      role="switch"
+      aria-checked={on}
+      aria-label={label ?? "Disponibilidad"}
+      onClick={() => onChange(!on)}
+      className={`relative w-[4.4rem] h-10 rounded-full transition-colors duration-300 shrink-0 ${on ? "bg-ok" : "bg-line"}`}
     >
-      <svg viewBox="0 0 24 24" className="w-4 h-4" fill={on ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
-        <path d="M12 20.5S4 15.5 4 9.8A4.3 4.3 0 0 1 8.3 5.5c1.6 0 3 .8 3.7 2.1.7-1.3 2.1-2.1 3.7-2.1A4.3 4.3 0 0 1 20 9.8c0 5.7-8 10.7-8 10.7Z" />
-      </svg>
+      <span className={`absolute top-1 w-8 h-8 rounded-full bg-card shadow-md transition-transform duration-300 ease-out ${on ? "translate-x-[2.4rem]" : "translate-x-1"}`}>
+        <span className={`w-full h-full grid place-items-center ${on ? "text-ok" : "text-soft"}`}>
+          <Icon name={on ? "check" : "x"} className="w-3.5 h-3.5" strokeWidth={3} />
+        </span>
+      </span>
     </button>
   );
 }
 
-function useFav() {
-  const s = useAppStore();
-  return { favorites: s.favorites, toggleFav: (id: string) => toggleFavStore(id) };
-}
-import { useApp as useAppStore, toggleFav as toggleFavStore } from "./store";
+/* ── stylized animated map ── */
+export function MapCard({ dark = false, moving = false, label }: { dark?: boolean; moving?: boolean; label?: string }) {
+  const rm = useReducedMotion();
+  const bg = dark ? "#141d17" : "#e9eee6";
+  const road = dark ? "#243129" : "#ffffff";
+  const block = dark ? "#1b2620" : "#dfe7db";
+  const accent = dark ? "#ffc24b" : "#0e5c49";
 
-/* ── skeletons ── */
-export function SkelCards({ n = 3 }: { n?: number }) {
   return (
-    <div className="flex gap-4 overflow-hidden">
-      {Array.from({ length: n }).map((_, i) => (
-        <div key={i} className="w-[15rem] shrink-0 card p-4 space-y-3">
-          <div className="flex justify-between"><div className="skel w-14 h-14 rounded-full" /><div className="skel w-8 h-8 rounded-full" /></div>
-          <div className="skel h-4 w-3/4" />
-          <div className="skel h-3 w-1/2" />
-          <div className="skel h-8 w-full rounded-full" />
-        </div>
-      ))}
-    </div>
-  );
-}
+    <div className={`relative overflow-hidden rounded-2xl ${dark ? "bg-nsurf" : "bg-tint"}`}>
+      <svg viewBox="0 0 400 300" className="w-full h-full block" preserveAspectRatio="xMidYMid slice" aria-hidden>
+        <rect width="400" height="300" fill={bg} />
+        {/* blocks */}
+        {[
+          [20, 20, 90, 70], [130, 20, 110, 70], [260, 20, 120, 70],
+          [20, 110, 90, 80], [130, 110, 110, 80], [260, 110, 120, 80],
+          [20, 210, 90, 70], [130, 210, 110, 70], [260, 210, 120, 70],
+        ].map(([x, y, w, h], i) => (
+          <rect key={i} x={x} y={y} width={w} height={h} rx="8" fill={block} />
+        ))}
+        {/* park */}
+        <rect x="130" y="110" width="110" height="80" rx="8" fill={dark ? "#1e3a2b" : "#cfe3c8"} />
+        <circle cx="160" cy="140" r="7" fill={dark ? "#2c523c" : "#b5d3a8"} />
+        <circle cx="190" cy="165" r="9" fill={dark ? "#2c523c" : "#b5d3a8"} />
+        {/* roads */}
+        <rect x="0" y="95" width="400" height="12" fill={road} />
+        <rect x="0" y="195" width="400" height="12" fill={road} />
+        <rect x="115" y="0" width="12" height="300" fill={road} />
+        <rect x="245" y="0" width="12" height="300" fill={road} />
+        <path d="M0 40 Q 200 60 400 30" stroke={road} strokeWidth="9" fill="none" />
 
-export function SkelList({ n = 4 }: { n?: number }) {
-  return (
-    <div className="space-y-3">
-      {Array.from({ length: n }).map((_, i) => (
-        <div key={i} className="card p-4 flex gap-4 items-center">
-          <div className="skel w-16 h-16 rounded-2xl" />
-          <div className="flex-1 space-y-2"><div className="skel h-4 w-2/3" /><div className="skel h-3 w-1/2" /><div className="skel h-3 w-1/3" /></div>
-          <div className="skel h-10 w-24 rounded-full" />
-        </div>
-      ))}
-    </div>
-  );
-}
+        {/* user location */}
+        <g transform="translate(251 201)">
+          <circle r="26" fill={accent} opacity="0.12" />
+          <circle r="6" fill={accent} />
+          <circle r="6" fill="none" stroke={dark ? "#0e1512" : "#fff"} strokeWidth="2.5" />
+        </g>
 
-/* ── sección con título y "ver todo" ── */
-export function RowHead({ icon, title, sub, action }: { icon?: IconName; title: string; sub?: string; action?: { label: string; fn: () => void } }) {
-  return (
-    <div className="flex items-end justify-between mb-4">
-      <div>
-        <h2 className="font-disp font-bold text-xl sm:text-2xl flex items-center gap-2.5">
-          {icon && (
-            <span className="w-9 h-9 rounded-xl bg-grnsoft text-grn grid place-items-center">
-              <Icon name={icon} className="w-4.5 h-4.5" strokeWidth={2} />
-            </span>
-          )}
-          {title}
-        </h2>
-        {sub && <p className="text-mut text-sm mt-1">{sub}</p>}
-      </div>
-      {action && (
-        <button onClick={action.fn} className="text-grn font-bold text-sm hover:underline underline-offset-4 flex items-center gap-1">
-          {action.label} <Icon name="chevr" className="w-3.5 h-3.5" strokeWidth={2.4} />
-        </button>
+        {/* moving pro marker (solo con movimiento permitido) */}
+        {moving && !rm && (
+          <g>
+            <g>
+              <animateMotion dur="9s" repeatCount="indefinite" path="M 60 40 Q 150 100 251 201" />
+              <circle r="15" fill={accent} />
+              <path d="M -6 0 l 5 -5 v 3 h 7 v 4 h -7 v 3 z" fill={dark ? "#0e1512" : "#fff"} transform="rotate(45)" />
+            </g>
+          </g>
+        )}
+      </svg>
+
+      {label && (
+        <span className="absolute bottom-2.5 left-2.5 text-[0.62rem] font-bold text-white/90 bg-ink/70 backdrop-blur rounded-full px-2.5 py-1">
+          {label}
+        </span>
+      )}
+      {!moving && (
+        <span className="absolute top-2.5 right-2.5 w-8 h-8 grid place-items-center rounded-full bg-card/90 backdrop-blur shadow-sm text-mut">
+          <Icon name="pin" className="w-4 h-4" strokeWidth={2.2} />
+        </span>
       )}
     </div>
   );
 }
 
-export function Carousel({ children }: { children: ReactNode }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const scroll = (dir: number) => ref.current?.scrollBy({ left: dir * 300, behavior: "smooth" });
+/* ── radar pulse (searching) ── */
+export function Radar() {
+  const rm = useReducedMotion();
   return (
-    <div className="relative">
-      <div ref={ref} className="flex gap-4 overflow-x-auto no-scrollbar pb-2 -mx-5 px-5 sm:mx-0 sm:px-0 snap-x">{children}</div>
-      <div className="hidden lg:flex absolute -right-2 top-1/3 gap-2">
-        <button onClick={() => scroll(-1)} className="w-10 h-10 rounded-full card grid place-items-center text-mut hover:text-ink2 transition-colors" aria-label="Anterior">
-          <Icon name="chevl" className="w-4 h-4" strokeWidth={2.4} />
-        </button>
-        <button onClick={() => scroll(1)} className="w-10 h-10 rounded-full card grid place-items-center text-mut hover:text-ink2 transition-colors" aria-label="Siguiente">
-          <Icon name="chevr" className="w-4 h-4" strokeWidth={2.4} />
-        </button>
-      </div>
+    <div className="relative w-24 h-24 grid place-items-center">
+      {!rm && (
+        <>
+          <span className="absolute inset-0 rounded-full bg-pine/20 animate-pulse-ring" />
+          <span className="absolute inset-0 rounded-full bg-pine/15 animate-pulse-ring" style={{ animationDelay: "0.7s" }} />
+        </>
+      )}
+      <span className="relative w-16 h-16 rounded-full bg-pine grid place-items-center shadow-lift">
+        <Icon name="radar" className="w-8 h-8 text-white" strokeWidth={1.8} />
+      </span>
     </div>
   );
 }
 
-export const initialsOf = (name: string) => name.split(" ").map((w) => w[0]).slice(0, 2).join("");
-export const proFace = (id: string) => proById(id).face;
+/* ── countdown mm:ss ── */
+export function useCountdown(total: number) {
+  const [left, setLeft] = useState(total);
+  useEffect(() => { setLeft(total); }, [total]);
+  useEffect(() => {
+    if (left <= 0) return;
+    const t = setTimeout(() => setLeft((v) => v - 1), 1000);
+    return () => clearTimeout(t);
+  }, [left]);
+  const m = Math.floor(left / 60);
+  const s = left % 60;
+  return { left, str: `${m}:${s.toString().padStart(2, "0")}` };
+}
