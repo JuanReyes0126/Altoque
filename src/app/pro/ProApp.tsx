@@ -3,7 +3,7 @@ import { Icon } from "../../components/icons";
 import { Face, FadeUp, JobPhoto, MapCard, Stars, Toggle, useCountdown } from "../bits";
 import {
   acceptIncoming, advanceProJob, catById, dismissIncoming, fmt, getState, jobUrl, proById, setProAvailable,
-  setRole, spawnInbox, tickInbox, useApp, zoneById, CARLOS_ID,
+  setRole, signOut, spawnInbox, tickInbox, useApp, zoneById, CARLOS_ID,
 } from "../store";
 
 type ProTab = "home" | "activity" | "me";
@@ -37,7 +37,7 @@ export function ProApp() {
         <header className="pt-6 flex items-center gap-3">
           <div className="min-w-0 flex-1">
             <p className="text-[0.62rem] font-extrabold uppercase tracking-[0.18em] text-nmut">Modo profesional</p>
-            <h1 className="font-disp font-bold text-[1.35rem] leading-tight truncate">{me.name}</h1>
+            <h1 className="font-disp font-bold text-[1.35rem] leading-tight truncate">{s.session?.name ?? me.name}</h1>
           </div>
           <div className="flex items-center gap-2">
             <span className={`text-[0.68rem] font-extrabold rounded-full px-3 py-1.5 ${s.proAvailable ? "bg-[#173526] text-[#4ade80]" : "bg-nsurf text-nmut"}`}>

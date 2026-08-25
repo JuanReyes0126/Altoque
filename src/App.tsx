@@ -1,10 +1,11 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Icon } from "./components/icons";
 import { ProApp } from "./app/pro/ProApp";
+import { Landing } from "./app/landing/Landing";
 import { ClientHome, ExploreView, ResultsView } from "./app/client/Home";
 import { ProProfile } from "./app/client/Profile";
 import { FavoritesTab, MeTab, RequestWizard, RequestsTab, TrackingView } from "./app/client/Flow";
-import { useApp, type Tab, type View } from "./app/store";
+import { takeIntent, useApp, type Tab, type View } from "./app/store";
 
 const TAB_META: { k: Tab; icon: "home" | "search" | "clip" | "heart" | "user"; l: string }[] = [
   { k: "home", icon: "home", l: "Inicio" },
@@ -17,7 +18,10 @@ const TAB_META: { k: Tab; icon: "home" | "search" | "clip" | "heart" | "user"; l
 function ClientApp() {
   const s = useApp();
   const [tab, setTab] = useState<Tab>("home");
-  const [stack, setStack] = useState<View[]>([]);
+  const [stack, setStack] = useState<View[]>(() => {
+    const i = takeIntent();
+    return i ? [i] : [];
+  });
 
   const go = (v: View) => setStack((st) => [...st, v]);
   const back = () => setStack((st) => st.slice(0, -1));
@@ -101,11 +105,11 @@ function Toast() {
 }
 
 export default function App() {
-  const { role } = useApp();
+  const { role, session } = useApp();
 
   return (
     <div className="p-root min-h-dvh">
-      {role === "pro" ? <ProApp /> : <ClientApp />}
+      {!session ? <Landing /> : role === "pro" ? <ProApp /> : <ClientApp />}
       <Toast />
     </div>
   );

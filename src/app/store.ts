@@ -33,10 +33,13 @@ export interface ProJob {
   problem: string; photos: number[]; status: JobStatus; etaMin: number; price: number;
 }
 
+export interface Session { name: string; kind: "client" | "pro" }
+
 export interface State {
   role: Role; zoneId: string; favorites: string[]; jobs: Job[]; inbox: Incoming[];
   proActive: ProJob | null; proAvailable: boolean; toastMsg: string | null; toastId: number;
   proStats: { today: number; earnings: number; week: number[]; acceptRate: number };
+  session: Session | null;
 }
 
 /* ─────────────────────────── datos ─────────────────────────── */
@@ -313,10 +316,23 @@ export const INCOMING_POOL: Omit<Incoming, "id" | "expiresIn">[] = [
 ];
 
 /* ─────────────────────────── store ─────────────────────────── */
+function loadSession(): Session | null {
+  try {
+    const raw = localStorage.getItem("altoque_session");
+    if (!raw) return null;
+    const p = JSON.parse(raw);
+    return p && typeof p.name === "string" && (p.kind === "client" || p.kind === "pro") ? p : null;
+  } catch {
+    return null;
+  }
+}
+const persisted = loadSession();
+
 let state: State = {
-  role: "client", zoneId: "cerros", favorites: ["p1", "p3", "p5"], jobs: [], inbox: [],
+  role: persisted?.kind === "pro" ? "pro" : "client", zoneId: "cerros", favorites: ["p1", "p3", "p5"], jobs: [], inbox: [],
   proActive: null, proAvailable: true, toastMsg: null, toastId: 0,
   proStats: { today: 4, earnings: 6350, week: [4200, 5800, 3900, 7200, 6350, 0, 0], acceptRate: 96 },
+  session: persisted,
 };
 
 const listeners = new Set<() => void>();
@@ -334,6 +350,22 @@ export const setProAvailable = (v: boolean) => {
   set({ proAvailable: v });
   if (v) setTimeout(() => { if (state.proAvailable) toast("Estás visible para nuevas solicitudes"); }, 300);
 };
+
+/* ── sesión (mock) y navegación desde la landing ── */
+export function signIn(name: string, kind: "client" | "pro") {
+  const session: Session = { name: name.trim() || "María Peralta", kind };
+  try { localStorage.setItem("altoque_session", JSON.stringify(session)); } catch { /* demo */ }
+  set({ session, role: kind });
+  toast(kind === "pro" ? "Bienvenido a tu panel profesional" : `Hola, ${session.name.split(" ")[0]} 👋`);
+}
+export function signOut() {
+  try { localStorage.removeItem("altoque_session"); } catch { /* demo */ }
+  set({ session: null, role: "client" });
+}
+
+let pendingIntent: View | null = null;
+export const setIntent = (v: View | null) => { pendingIntent = v; };
+export const takeIntent = (): View | null => { const i = pendingIntent; pendingIntent = null; return i; };
 
 export const fmt = (n: number) => "RD$" + n.toLocaleString("es-DO");
 export const catById = (id: string) => CATS.find((c) => c.id === id)!;

@@ -3,7 +3,7 @@ import { Icon } from "../../components/icons";
 import { AvailDot, Face, FadeUp, JobPhoto, MapCard, ProListItem, Radar, RowHead, Stars, Verif, useFakeLoad } from "../bits";
 import {
   CATS, JOB_IMGS, PROBLEMS, ZONES, advanceJob, catById, createJob, fmt, proById, prosByCat, rateJob,
-  setRole, toggleFav, useApp, zoneById, type View,
+  setRole, signOut, toggleFav, useApp, zoneById, type Tab, type View,
 } from "../store";
 
 /* ════════════════ REQUEST WIZARD ════════════════ */
@@ -601,16 +601,17 @@ export function FavoritesTab({ go }: { go: (v: View) => void }) {
 }
 
 /* ════════════════ PERFIL (tab) ════════════════ */
-export function MeTab({ go, jump }: { go: (v: View) => void; jump: (t: "jobs") => void }) {
+export function MeTab({ go, jump }: { go: (v: View) => void; jump: (t: Tab) => void }) {
   const s = useApp();
   const doneCount = s.jobs.filter((j) => j.status === "done").length;
+  const myName = s.session?.name ?? "María Peralta";
   return (
     <div className="max-w-2xl mx-auto px-5 pb-10">
       <h1 className="font-disp font-bold text-[1.5rem] text-ink pt-6">Mi perfil</h1>
       <section className="card p-6 mt-5 flex items-center gap-4">
-        <Face face={{ f: 3, q: 3 }} name="María Peralta" size="w-16 h-16" />
+        <Face face={{ f: 3, q: 3 }} name={myName} size="w-16 h-16" />
         <div>
-          <p className="font-disp font-bold text-[1.15rem] text-ink">María Peralta</p>
+          <p className="font-disp font-bold text-[1.15rem] text-ink">{myName}</p>
           <p className="text-[0.78rem] text-mut font-semibold mt-0.5">{zoneById(s.zoneId).name} · Santiago</p>
           <p className="text-[0.7rem] text-soft font-bold mt-1">{doneCount} servicios · miembro nuevo</p>
         </div>
@@ -620,7 +621,7 @@ export function MeTab({ go, jump }: { go: (v: View) => void; jump: (t: "jobs") =
         {[
           { ic: "pin", l: "Mis direcciones", fn: () => {} },
           { ic: "clip", l: "Historial de servicios", fn: () => jump("jobs") },
-          { ic: "heart", l: "Favoritos", fn: () => jump("favs" as never) },
+          { ic: "heart", l: "Favoritos", fn: () => jump("favs") },
           { ic: "shield", l: "Seguridad y privacidad", fn: () => {} },
         ].map((r) => (
           <button key={r.l} onClick={r.fn} className="w-full flex items-center gap-3.5 px-5 py-4 text-left hover:bg-tint/50 transition-colors">
@@ -638,6 +639,15 @@ export function MeTab({ go, jump }: { go: (v: View) => void; jump: (t: "jobs") =
           <span className="block text-[0.74rem] text-mut font-semibold">Cambia al modo profesional y consigue clientes</span>
         </span>
         <Icon name="arrow" className="w-4.5 h-4.5 text-pine shrink-0" strokeWidth={2.2} />
+      </button>
+
+      <button onClick={signOut} className="w-full card card-h mt-4 p-5 flex items-center gap-4 text-left border-cor/30">
+        <span className="w-11 h-11 rounded-xl bg-corsoft text-cor grid place-items-center shrink-0"><Icon name="logout" className="w-5 h-5" strokeWidth={1.9} /></span>
+        <span className="flex-1">
+          <span className="block font-disp font-bold text-[0.95rem] text-ink">Cerrar sesión</span>
+          <span className="block text-[0.74rem] text-mut font-semibold">Volver a la página de inicio de Altoque</span>
+        </span>
+        <Icon name="arrow" className="w-4.5 h-4.5 text-cor shrink-0" strokeWidth={2.2} />
       </button>
 
       <p className="text-center text-[0.66rem] text-soft font-semibold mt-8">
