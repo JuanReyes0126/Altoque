@@ -19,19 +19,81 @@
  */
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
+// Funciones de hashing POR DEFECTO de la propia librería (mismo algoritmo
+// y parámetros que usaría sin nuestra configuración — solo las envolvemos
+// para medir su duración durante el debug F1.8).
+import { hashPassword as baHashPassword, verifyPassword as baVerifyPassword } from "better-auth/crypto";
 import { prisma } from "../database/prisma.js";
 import { canonicalOrigin, env, isProd, trustedOrigins } from "../config/env.js";
+import { diagEnabled, stage, withDiagAdapter } from "../lib/diag.js";
 import { resetPasswordEmail, verificationEmail } from "./email.js";
 
 const e = env();
+
+// ⚠️ TEMPORAL (debug F1.8): con ALTOQUE_DIAG=1 se envuelve el adapter para
+// ver cada operación de BD que Better Auth realiza (op + model + duración).
+const baseAdapterFactory = prismaAdapter(prisma, { provider: "postgresql" });
+const database = diagEnabled() ? withDiagAdapter(baseAdapterFactory) : baseAdapterFactory;
 
 export const auth = betterAuth({
   // Dinámico: APP_URL (prod) → VERCEL_URL (cada Preview) → localhost (dev).
   baseURL: canonicalOrigin(),
   basePath: "/api/v1/auth",
   secret: e.BETTER_AUTH_SECRET,
-  database: prismaAdapter(prisma, { provider: "postgresql" }),
+  database,
   trustedOrigins: trustedOrigins(),
+
+  // ⚠️ TEMPORAL (debug F1.8): hooks de BD de Better Auth — puntos de
+  // instrumentación oficiales de la librería. Solo registran etapas;
+  // `before` devuelve undefined (= "continuar sin cambios") y `after`
+  // no devuelve nada, así que NO alteran el comportamiento.
+  databaseHooks: {
+    user: {
+      create: {
+        before: async () => { stage("[diag][ba:hook] user.create.before"); },
+        after: async () => { stage("[diag][ba:hook] user.create.after"); },
+      },
+    },
+    account: {
+      create: {
+        before: async () => { stage("[diag][ba:hook] account.create.before"); },
+        after: async () => { stage("[diag][ba:hook] account.create.after"); },
+      },
+    },
+    verification: {
+      create: {
+        before: async () => { stage("[diag][ba:hook] verification.create.before"); },
+        after: async () => { stage("[diag][ba:hook] verification.create.after"); },
+      },
+    },
+    session: {
+      create: {
+        before: async () => { stage("[diag][ba:hook] session.create.before"); },
+        after: async () => { stage("[diag][ba:hook] session.create.after"); },
+      },
+    },
+  },
+
+  // ⚠️ TEMPORAL (debug F1.8): envolvemos las funciones de hashing POR
+  // DEFECTO de Better Auth con logs start/done. Mismo algoritmo y
+  // parámetros — solo medimos duración. NUNCA se registra la contraseña
+  // ni el hash.
+  password: {
+    hash: async (password: string) => {
+      stage("[diag][ba:password] hash → start");
+      const t0 = Date.now();
+      const hash = await baHashPassword(password);
+      stage("[diag][ba:password] hash → done", { durationMs: Date.now() - t0 });
+      return hash;
+    },
+    verify: async (data: { hash: string; password: string }) => {
+      stage("[diag][ba:password] verify → start");
+      const t0 = Date.now();
+      const ok = await baVerifyPassword(data);
+      stage("[diag][ba:password] verify → done", { durationMs: Date.now() - t0 });
+      return ok;
+    },
+  },
 
   advanced: {
     // Cookies: HttpOnly + SameSite=Lax (default de Better Auth) +
@@ -75,6 +137,10 @@ export const auth = betterAuth({
     storeIdentifier: "hashed",
   },
 });
+
+// ⚠️ TEMPORAL (debug F1.8): confirma que la construcción de la instancia
+// Better Auth terminó en el cold start (corre una vez por función).
+stage("[diag] betterAuth() configured");
 
 /** Tipos inferidos de la instancia para el resto del servidor. */
 export type AuthSession = typeof auth.$Infer.Session;

@@ -37,14 +37,32 @@ app.use("/api/v1/*", originCheck);
 // la petición ENTRA a Better Auth. Si este log aparece pero el accessLog
 // ("request") de security.ts NO aparece, el hang está DENTRO de auth.handler.
 app.on(["GET", "POST"], "/api/v1/auth/*", async (c) => {
+  const rid = c.get("requestId");
   if (diagEnabled()) {
     log.info("[diag] auth.handler → start", {
-      requestId: c.get("requestId"),
+      requestId: rid,
       method: c.req.method,
       path: c.req.path,
     });
   }
-  return auth.handler(c.req.raw);
+  // ⚠️ TEMPORAL (debug F1.8): registramos también cuándo el handler
+  // DEVUELVE la Response o si RECHAZA — si "start" aparece sin "done",
+  // la promesa de Better Auth no se asentó (hang confirmado).
+  try {
+    const res = await auth.handler(c.req.raw);
+    if (diagEnabled()) {
+      log.info("[diag] auth.handler → done", { requestId: rid, status: res.status });
+    }
+    return res;
+  } catch (err) {
+    if (diagEnabled()) {
+      log.error("[diag] auth.handler → threw", {
+        requestId: rid,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+    throw err;
+  }
 });
 
 // ── dominio F1 ──
