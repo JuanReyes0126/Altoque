@@ -6,6 +6,7 @@
  * Errores centralizados (F1.5): ningún endpoint hace su propio
  * formateo de errores.
  */
+import type { IncomingMessage } from "node:http";
 import { Hono } from "hono";
 import { ZodError } from "zod";
 // Node ESM exige extensión explícita en imports relativos:
@@ -43,6 +44,28 @@ app.on(["GET", "POST"], "/api/v1/auth/*", async (c) => {
       requestId: rid,
       method: c.req.method,
       path: c.req.path,
+    });
+  }
+  // ⚠️ TEMPORAL (debug F1.8): diagnóstico PASIVO del Request que llega a
+  // Better Auth. Solo lee metadatos (headers, flags) — JAMÁS el cuerpo.
+  // `incoming` lo inyecta @hono/node-server como env (c.env.incoming);
+  // sus flags dicen si Vercel ya recibió/terminó el mensaje ANTES de que
+  // el stream Web se conectara (hipótesis de attach tardío / EOF perdido).
+  if (diagEnabled()) {
+    const raw = c.req.raw;
+    const inc = (c.env as unknown as { incoming?: IncomingMessage }).incoming;
+    log.info("[diag] pre-handler request shape", {
+      requestId: rid,
+      method: raw.method,
+      hasContentType: raw.headers.has("content-type"),
+      contentTypeIsJson: (raw.headers.get("content-type") ?? "").includes("application/json"),
+      hasContentLength: raw.headers.has("content-length"),
+      contentLength: raw.headers.get("content-length"),
+      bodyUsed: raw.bodyUsed,
+      bodyIsNull: raw.body === null,
+      incomingComplete: inc?.complete ?? null,
+      incomingReadableEnded: inc?.readableEnded ?? null,
+      incomingReadableLength: inc?.readableLength ?? null,
     });
   }
   // ⚠️ TEMPORAL (debug F1.8): registramos también cuándo el handler
