@@ -48,12 +48,13 @@ app.on(["GET", "POST"], "/api/v1/auth/*", async (c) => {
   }
   // ⚠️ TEMPORAL (debug F1.8): diagnóstico PASIVO del Request que llega a
   // Better Auth. Solo lee metadatos (headers, flags) — JAMÁS el cuerpo.
-  // `incoming` lo inyecta @hono/node-server como env (c.env.incoming);
-  // sus flags dicen si Vercel ya recibió/terminó el mensaje ANTES de que
-  // el stream Web se conectara (hipótesis de attach tardío / EOF perdido).
+  // Con el adaptador oficial `hono/vercel` el Request ya viene buferado por
+  // el runtime de Vercel y c.env NO incluye `incoming` (es undefined); los
+  // campos incoming* salen `null`, lo que confirma el patrón Web-standard.
+  // `?.` sobre c.env evita un TypeError cuando env es undefined.
   if (diagEnabled()) {
     const raw = c.req.raw;
-    const inc = (c.env as unknown as { incoming?: IncomingMessage }).incoming;
+    const inc = (c.env as unknown as { incoming?: IncomingMessage } | undefined)?.incoming;
     log.info("[diag] pre-handler request shape", {
       requestId: rid,
       method: raw.method,
