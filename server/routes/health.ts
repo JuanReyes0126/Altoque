@@ -5,7 +5,7 @@
  */
 import { Hono } from "hono";
 import { prisma } from "../database/prisma.js";
-import { isProd } from "../config/env.js";
+import { deployEnv } from "../config/env.js";
 
 export const healthRoutes = new Hono();
 
@@ -21,7 +21,7 @@ healthRoutes.get("/healthz", async (c) => {
     {
       status: db === "up" ? "ok" : "degraded",
       service: "altoque-api",
-      env: isProd() ? "production" : "development",
+      env: deployEnv(),
       db,
       time: new Date().toISOString(),
     },

@@ -62,6 +62,26 @@ export function env(): Env {
 export const isProd = () => env().NODE_ENV === "production";
 
 /**
+ * Entorno de DESPLIEGUE (Vercel). Distinto de NODE_ENV, que se mantiene
+ * para el comportamiento de Node y las librerías:
+ *   - production → dominio real
+ *   - preview    → cada Preview de Vercel (HTTPS)
+ *   - development → local o sin Vercel
+ *
+ * NOTA: isProd() sigue gobernando cookies Secure/HSTS en Better Auth y
+ * middleware — Preview usa HTTPS y DEBE seguir con cookies Secure.
+ */
+export type DeployEnv = "development" | "preview" | "production";
+
+export function deployEnv(): DeployEnv {
+  const vercelEnv = process.env.VERCEL_ENV;
+  if (vercelEnv === "preview" || vercelEnv === "production") {
+    return vercelEnv;
+  }
+  return "development";
+}
+
+/**
  * Origen canónico de la aplicación (v1.1 §6 — URLs dinámicas de Preview):
  *   1. APP_URL explícita (Production con dominio real, o dev local).
  *   2. VERCEL_URL (Vercel la inyecta en cada deploy: cada Preview tiene
