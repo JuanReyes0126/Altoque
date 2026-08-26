@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/* El código de servidor (api/, server/) NO debe generar CSS de frontend.
+   Sin esta exclusión, Tailwind v4 escanea todo el proyecto y cualquier
+   edición en el backend altera el hash del bundle del cliente. */
+@source not "../api";
+@source not "../server";
+
 /* ════════════════ ALTOQUE · DESIGN SYSTEM ════════════════ */
 @theme {
   /* light surfaces */
