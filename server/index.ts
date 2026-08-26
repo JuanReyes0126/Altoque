@@ -8,15 +8,17 @@
  */
 import { Hono } from "hono";
 import { ZodError } from "zod";
-import { auth } from "./auth/auth";
-import type { AuthEnv } from "./middleware/auth";
-import { accessLog, originCheck, requestId, securityHeaders } from "./middleware/security";
-import { AppError } from "./lib/errors";
-import { err } from "./lib/envelope";
-import { log } from "./lib/logger";
-import { healthRoutes } from "./routes/health";
-import { categoryRoutes } from "./routes/categories";
-import { meRoutes } from "./routes/me";
+// Node ESM exige extensión explícita en imports relativos:
+// "./x.js" resuelve al .ts en compilación y al .js emitido en runtime.
+import { auth } from "./auth/auth.js";
+import type { AuthEnv } from "./middleware/auth.js";
+import { accessLog, originCheck, requestId, securityHeaders } from "./middleware/security.js";
+import { AppError } from "./lib/errors.js";
+import { err } from "./lib/envelope.js";
+import { log } from "./lib/logger.js";
+import { healthRoutes } from "./routes/health.js";
+import { categoryRoutes } from "./routes/categories.js";
+import { meRoutes } from "./routes/me.js";
 
 export const app = new Hono<AuthEnv>();
 
