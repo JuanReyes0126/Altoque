@@ -49,24 +49,6 @@ export const auth = betterAuth({
   database,
   trustedOrigins: trustedOrigins(),
 
-  // ⚠️ TEMPORAL (debug F1.8): hooks GLOBALES de request de Better Auth —
-  // el PRIMER checkpoint dentro de la librería para cada petición, antes
-  // de leer el body, antes de rate-limit, antes de cualquier BD.
-  // Solo registran path/method (sin PII); no alteran el flujo.
-  hooks: {
-    before: async (ctx) => {
-      stage("[diag][ba:hook] request.before", {
-        path: typeof ctx.path === "string" ? ctx.path : undefined,
-        method: typeof ctx.method === "string" ? ctx.method : undefined,
-      });
-    },
-    after: async (ctx) => {
-      stage("[diag][ba:hook] request.after", {
-        path: typeof ctx.path === "string" ? ctx.path : undefined,
-      });
-    },
-  },
-
   // ⚠️ TEMPORAL (debug F1.8): hooks de BD de Better Auth — puntos de
   // instrumentación oficiales de la librería. Solo registran etapas;
   // `before` devuelve undefined (= "continuar sin cambios") y `after`

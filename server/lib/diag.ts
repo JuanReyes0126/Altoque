@@ -97,34 +97,3 @@ export function withDiagAdapter<TFactory extends (options: never) => Record<stri
     return adapter;
   }) as TFactory;
 }
-
-/**
- * ⚠️ TEMPORAL (debug F1.8) — observa las lecturas del cuerpo del Request
- * (json/text/arrayBuffer/…). Better Auth lee el body del signup con
- * `req.json()`; si esa promesa no se resuelve (stream que nunca termina),
- * el handler cuelga ANTES de tocar hooks, hashing o BD — exactamente el
- * síntoma observado. Registra solo etapa y duración; JAMÁS el contenido.
- */
-export function withBodyDiag(raw: Request): Request {
-  if (!enabled()) return raw;
-  for (const m of ["json", "text", "arrayBuffer", "formData", "blob"] as const) {
-    const orig = raw[m].bind(raw) as unknown as (...a: unknown[]) => Promise<unknown>;
-    Object.defineProperty(raw, m, {
-      value: async (...a: unknown[]) => {
-        stage(`[diag][req:${m}] → start`);
-        const t0 = Date.now();
-        try {
-          const out = await orig(...a);
-          stage(`[diag][req:${m}] → done`, { durationMs: Date.now() - t0 });
-          return out;
-        } catch (e) {
-          stage(`[diag][req:${m}] → threw`, {
-            message: e instanceof Error ? e.message : String(e),
-          });
-          throw e;
-        }
-      },
-    });
-  }
-  return raw;
-}

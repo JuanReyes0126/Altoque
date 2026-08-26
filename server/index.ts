@@ -16,7 +16,7 @@ import { accessLog, originCheck, requestId, securityHeaders } from "./middleware
 import { AppError } from "./lib/errors.js";
 import { err } from "./lib/envelope.js";
 import { log } from "./lib/logger.js";
-import { diagEnabled, withBodyDiag } from "./lib/diag.js";
+import { diagEnabled } from "./lib/diag.js";
 import { healthRoutes } from "./routes/health.js";
 import { categoryRoutes } from "./routes/categories.js";
 import { meRoutes } from "./routes/me.js";
@@ -48,10 +48,10 @@ app.on(["GET", "POST"], "/api/v1/auth/*", async (c) => {
   // ⚠️ TEMPORAL (debug F1.8): registramos también cuándo el handler
   // DEVUELVE la Response o si RECHAZA — si "start" aparece sin "done",
   // la promesa de Better Auth no se asentó (hang confirmado).
-  // withBodyDiag observa las lecturas del body (req.json()…) sin tocar
-  // su contenido: si el hang está en la lectura del stream, lo veremos.
+  // Montaje oficial directo: c.req.raw pasa a Better Auth sin envolver
+  // (los wrappers de body/hooks que lo interceptaban fueron retirados).
   try {
-    const res = await auth.handler(withBodyDiag(c.req.raw));
+    const res = await auth.handler(c.req.raw);
     if (diagEnabled()) {
       log.info("[diag] auth.handler → done", { requestId: rid, status: res.status });
     }
