@@ -5,8 +5,8 @@
  * (password), tokens ni datos de otras tablas.
  */
 import { Hono } from "hono";
-import { requireAuth, requireVerifiedEmail, type AuthEnv } from "../middleware/auth";
-import { ok } from "../lib/envelope";
+import { requireAuth, requireVerifiedEmail, type AuthEnv } from "../middleware/auth.js";
+import { ok } from "../lib/envelope.js";
 
 export const meRoutes = new Hono<AuthEnv>();
 

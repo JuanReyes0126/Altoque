@@ -12,7 +12,7 @@
  *     El acceso privado NUNCA es una URL pública permanente: se sirve
  *     vía GET /api/v1/files/:id tras sesión + requirePermission/ownership.
  */
-import { AppError } from "./errors";
+import { AppError } from "./errors.js";
 
 export type AllowedKind = "image" | "document";
 

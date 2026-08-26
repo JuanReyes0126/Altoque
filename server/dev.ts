@@ -8,8 +8,8 @@
  * en F2; en producción todo comparte origen y no hay CORS).
  */
 import { serve } from "@hono/node-server";
-import { app } from "./index";
-import { log } from "./lib/logger";
+import { app } from "./index.js";
+import { log } from "./lib/logger.js";
 
 const port = Number(process.env.PORT ?? 8787);
 

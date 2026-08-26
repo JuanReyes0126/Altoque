@@ -5,8 +5,8 @@
  * nada está hardcodeado en el servidor.
  */
 import { Hono } from "hono";
-import { prisma } from "../database/prisma";
-import { ok } from "../lib/envelope";
+import { prisma } from "../database/prisma.js";
+import { ok } from "../lib/envelope.js";
 
 export const categoryRoutes = new Hono();
 

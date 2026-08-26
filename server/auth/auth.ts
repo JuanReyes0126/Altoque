@@ -19,9 +19,9 @@
  */
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
-import { prisma } from "../database/prisma";
-import { canonicalOrigin, env, isProd, trustedOrigins } from "../config/env";
-import { resetPasswordEmail, verificationEmail } from "./email";
+import { prisma } from "../database/prisma.js";
+import { canonicalOrigin, env, isProd, trustedOrigins } from "../config/env.js";
+import { resetPasswordEmail, verificationEmail } from "./email.js";
 
 const e = env();
 

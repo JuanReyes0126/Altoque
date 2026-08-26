@@ -9,7 +9,7 @@
  */
 import { randomBytes } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
-import type { Tx } from "../database/prisma";
+import type { Tx } from "../database/prisma.js";
 
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 

@@ -4,8 +4,8 @@
  * configuración interna.
  */
 import { Hono } from "hono";
-import { prisma } from "../database/prisma";
-import { isProd } from "../config/env";
+import { prisma } from "../database/prisma.js";
+import { isProd } from "../config/env.js";
 
 export const healthRoutes = new Hono();
 

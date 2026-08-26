@@ -8,10 +8,10 @@
  * params o roles en el body NUNCA conceden privilegios (son solo UX).
  */
 import { createMiddleware } from "hono/factory";
-import { auth } from "../auth/auth";
-import { prisma } from "../database/prisma";
-import { AppError } from "../lib/errors";
-import { hasAdminPermission, type AdminRole, type Permission } from "../lib/permissions";
+import { auth } from "../auth/auth.js";
+import { prisma } from "../database/prisma.js";
+import { AppError } from "../lib/errors.js";
+import { hasAdminPermission, type AdminRole, type Permission } from "../lib/permissions.js";
 
 export interface AuthUser {
   id: string;

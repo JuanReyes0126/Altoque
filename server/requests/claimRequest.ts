@@ -16,9 +16,9 @@
  * el test de atomicidad pueda inyectar fallos y verificar el ROLLBACK.
  */
 import type { PrismaClient } from "@prisma/client";
-import type { Tx } from "../database/prisma";
-import { AppError } from "../lib/errors";
-import { ulid } from "../lib/ids";
+import type { Tx } from "../database/prisma.js";
+import { AppError } from "../lib/errors.js";
+import { ulid } from "../lib/ids.js";
 
 export interface ClaimArgs {
   requestId: string;

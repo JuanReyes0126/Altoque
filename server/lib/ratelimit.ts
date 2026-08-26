@@ -9,7 +9,7 @@
  * Los valores iniciales se ajustarán con métricas reales.
  */
 import type { PrismaClient } from "@prisma/client";
-import { AppError } from "./errors";
+import { AppError } from "./errors.js";
 
 export interface RateLimitRule {
   bucket: string;

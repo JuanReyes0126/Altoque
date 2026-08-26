@@ -6,8 +6,8 @@
  * Production (F2): se conecta Resend usando RESEND_API_KEY — la
  * interfaz ya está fijada para no tocar auth.ts.
  */
-import { log } from "../lib/logger";
-import { env } from "../config/env";
+import { log } from "../lib/logger.js";
+import { env } from "../config/env.js";
 
 export interface OutgoingEmail {
   to: string;

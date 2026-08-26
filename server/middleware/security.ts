@@ -10,10 +10,10 @@
  */
 import { randomUUID } from "node:crypto";
 import { createMiddleware } from "hono/factory";
-import { isProd, trustedOrigins } from "../config/env";
-import { AppError } from "../lib/errors";
-import { log } from "../lib/logger";
-import type { AuthEnv } from "./auth";
+import { isProd, trustedOrigins } from "../config/env.js";
+import { AppError } from "../lib/errors.js";
+import { log } from "../lib/logger.js";
+import type { AuthEnv } from "./auth.js";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 

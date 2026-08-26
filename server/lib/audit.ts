@@ -6,9 +6,9 @@
  * contraseñas, tokens ni contenido de documentos.
  */
 import type { PrismaClient } from "@prisma/client";
-import type { Tx } from "../database/prisma";
-import { ulid } from "./ids";
-import type { AdminRole } from "./permissions";
+import type { Tx } from "../database/prisma.js";
+import { ulid } from "./ids.js";
+import type { AdminRole } from "./permissions.js";
 
 export type AuditAction =
   | "PROVIDER_APPROVED"
