@@ -30,10 +30,16 @@ import { resetPasswordEmail, verificationEmail } from "./email.js";
 
 const e = env();
 
+// ⚠️ TEMPORAL (debug F1.8): confirma que ESTE módulo instrumentado fue el
+// que cargó (si no aparece en el cold start, el snapshot desplegado NO
+// incluye la instrumentación — descartamos "probaron código viejo").
+stage("[diag] auth module loading", { diag: diagEnabled() });
+
 // ⚠️ TEMPORAL (debug F1.8): con ALTOQUE_DIAG=1 se envuelve el adapter para
 // ver cada operación de BD que Better Auth realiza (op + model + duración).
 const baseAdapterFactory = prismaAdapter(prisma, { provider: "postgresql" });
 const database = diagEnabled() ? withDiagAdapter(baseAdapterFactory) : baseAdapterFactory;
+stage("[diag] database adapter prepared", { wrapped: diagEnabled() });
 
 export const auth = betterAuth({
   // Dinámico: APP_URL (prod) → VERCEL_URL (cada Preview) → localhost (dev).
@@ -42,6 +48,24 @@ export const auth = betterAuth({
   secret: e.BETTER_AUTH_SECRET,
   database,
   trustedOrigins: trustedOrigins(),
+
+  // ⚠️ TEMPORAL (debug F1.8): hooks GLOBALES de request de Better Auth —
+  // el PRIMER checkpoint dentro de la librería para cada petición, antes
+  // de leer el body, antes de rate-limit, antes de cualquier BD.
+  // Solo registran path/method (sin PII); no alteran el flujo.
+  hooks: {
+    before: async (ctx) => {
+      stage("[diag][ba:hook] request.before", {
+        path: typeof ctx.path === "string" ? ctx.path : undefined,
+        method: typeof ctx.method === "string" ? ctx.method : undefined,
+      });
+    },
+    after: async (ctx) => {
+      stage("[diag][ba:hook] request.after", {
+        path: typeof ctx.path === "string" ? ctx.path : undefined,
+      });
+    },
+  },
 
   // ⚠️ TEMPORAL (debug F1.8): hooks de BD de Better Auth — puntos de
   // instrumentación oficiales de la librería. Solo registran etapas;
@@ -137,6 +161,9 @@ export const auth = betterAuth({
     storeIdentifier: "hashed",
   },
 });
+
+// ⚠️ TEMPORAL (debug F1.8): betterAuth() completó su configuración.
+stage("[diag][ba] instance created (hooks · adapter · password wrappers wired)");
 
 // ⚠️ TEMPORAL (debug F1.8): confirma que la construcción de la instancia
 // Better Auth terminó en el cold start (corre una vez por función).

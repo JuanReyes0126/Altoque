@@ -13,6 +13,7 @@
  *    el pooler de Neon gestiona la vida de las conexiones.
  */
 import { PrismaClient } from "@prisma/client";
+import { log } from "../lib/logger.js";
 
 const globalForPrisma = globalThis as unknown as {
   __altoquePrisma?: PrismaClient;
@@ -50,6 +51,27 @@ function buildClient(): PrismaClient {
     });
     client.$on("warn", (e) => log.warn("[diag][prisma:warn]", { message: e.message }));
     client.$on("error", (e) => log.error("[diag][prisma:error]", { message: e.message }));
+
+    // ⚠️ TEMPORAL (debug F1.8): SELF-TEST — ejecuta SELECT 1 al arrancar el
+    // módulo y registra el resultado. Responde directamente la pregunta
+    // "¿los eventos [prisma:query] disparan en este runtime/versión?":
+    //  - si aparece "[diag][prisma:selftest] SELECT 1 ok" Y su
+    //    "[diag][prisma:query] SELECT 1", el pipeline de eventos funciona y
+    //    el silencio posterior en signup = la query del signup no completó
+    //    (o el adapter nunca la pidió).
+    //  - si el self-test falla, el problema es de conexión/engine en frío.
+    // No bloquea el cold start (fire-and-forget) y un fallo se registra sin
+    // romper el módulo.
+    const t0 = Date.now();
+    client
+      .$queryRaw`SELECT 1`
+      .then(() => log.info("[diag][prisma:selftest] SELECT 1 ok", { durationMs: Date.now() - t0 }))
+      .catch((e: unknown) =>
+        log.error("[diag][prisma:selftest] failed", {
+          durationMs: Date.now() - t0,
+          message: e instanceof Error ? e.message : String(e),
+        }),
+      );
   }
 
   return client;
