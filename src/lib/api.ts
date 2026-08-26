@@ -12,18 +12,79 @@
    ════════════════════════════════════════════════════════════════ */
 import {
   CATS, PROS, ZONES, acceptIncoming, advanceJob, advanceProJob, catById, createJob, getState,
-  proById, prosByCat, rateJob, searchAll, setProAvailable, signIn, signOut, toggleFav, zoneById,
+  proById, prosByCat, rateJob, searchAll, setProAvailable, toggleFav, zoneById,
 } from "./state";
-import type { Cat, Pro, Zone } from "../types";
+import { http } from "./http";
+import type { Cat, Pro, Role, Session, Zone } from "../types";
 
 export interface ProviderFilters { catId?: string; available?: boolean; verified?: boolean; sort?: "rating" | "dist" | "eta" }
 
-export const api = {
-  /* ── auth ── F1: POST /auth/login · /auth/register · /auth/logout (JWT httpOnly + refresh) */
-  auth: {
-    signIn,   // (name, role) → Session
-    signOut,  // () → void
+/* ── F1.8 · autenticación REAL (Better Auth + PostgreSQL) ─────────────
+ * La sesión vive en una cookie HttpOnly gestionada por Better Auth.
+ * El frontend NUNCA almacena tokens: solo representa lo que responde
+ * el servidor. El rol proviene del backend — jamás del navegador.
+ */
+interface ServerUser {
+  id: string;
+  name: string;
+  email: string;
+  role?: string;
+  status?: string;
+  emailVerified?: boolean;
+}
+const toSession = (u: ServerUser): Session => ({
+  id: u.id,
+  name: u.name,
+  email: u.email,
+  role: (u.role === "provider" || u.role === "admin" ? u.role : "customer") as Role,
+  status: u.status ?? "active",
+  emailVerified: !!u.emailVerified,
+});
+
+interface BetterAuthSessionResponse { user: ServerUser; session: unknown }
+
+export const authApi = {
+  /** POST /api/v1/auth/sign-up/email — crea el usuario REAL en Neon.
+   *  Con requireEmailVerification NO emite sesión: devuelve token de verificación. */
+  signUp: (d: { name: string; email: string; password: string; phone?: string }) =>
+    http<{ token?: string }>("/api/v1/auth/sign-up/email", { body: d }),
+
+  /** POST /api/v1/auth/sign-in/email — emite la cookie de sesión. */
+  signIn: async (d: { email: string; password: string }): Promise<Session> => {
+    const res = await http<BetterAuthSessionResponse>("/api/v1/auth/sign-in/email", { body: d });
+    return toSession(res.user);
   },
+
+  /** GET /api/v1/auth/get-session — restauración al abrir/recargar la app. */
+  getSession: async (): Promise<Session | null> => {
+    const res = await http<BetterAuthSessionResponse | null>("/api/v1/auth/get-session");
+    return res?.user ? toSession(res.user) : null;
+  },
+
+  /** GET /api/v1/me — fuente de verdad del perfil privado básico. */
+  me: async (): Promise<Session> => {
+    const res = await http<{ data: ServerUser }>("/api/v1/me");
+    return toSession(res.data);
+  },
+
+  /** POST /api/v1/auth/sign-out — revoca la sesión en el servidor. */
+  signOut: () => http<void>("/api/v1/auth/sign-out", { body: {}, noContent: true }),
+
+  /** POST /api/v1/auth/send-verification-email — reenvío del enlace. */
+  resendVerification: (email: string) =>
+    http<unknown>("/api/v1/auth/send-verification-email", {
+      body: { email, callbackURL: `${window.location.origin}/` },
+    }),
+
+  /** GET /api/v1/auth/verify-email?token=… — desde el enlace del correo
+   *  (autoSignInAfterVerification emite la cookie al verificar). */
+  verifyEmail: (token: string) =>
+    http<unknown>(`/api/v1/auth/verify-email?token=${encodeURIComponent(token)}`),
+};
+
+export const api = {
+  /* ── auth real (F1.8) ── */
+  auth: authApi,
 
   /* ── catálogo ── F2: GET /categories · GET /zones (cacheables, raramente cambian) */
   categories: {

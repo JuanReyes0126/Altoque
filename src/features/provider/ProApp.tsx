@@ -3,9 +3,10 @@ import { useNavigate } from "react-router-dom";
 import { Icon } from "../../components/icons";
 import { Face, FadeUp, JobPhoto, MapCard, Stars, Toggle, useCountdown } from "../../components/ui/kit";
 import {
-  acceptIncoming, advanceProJob, catById, dismissIncoming, fmt, getState, proById, setProAvailable,
-  setRole, signOut, spawnInbox, tickInbox, useApp, zoneById, CARLOS_ID,
+  acceptIncoming, advanceProJob, catById, clearSession, dismissIncoming, fmt, getState, proById, setProAvailable,
+  setRole, spawnInbox, tickInbox, useApp, zoneById, CARLOS_ID,
 } from "../../lib/state";
+import { authApi } from "../../lib/api";
 import { PATHS } from "../../lib/router";
 
 type ProTab = "home" | "activity" | "me";
@@ -392,7 +393,14 @@ function ProMe() {
         <Icon name="arrow" className="w-4.5 h-4.5 text-namber shrink-0" strokeWidth={2.2} />
       </button>
 
-      <button onClick={() => { signOut(); nav(PATHS.home); }} className="w-full ncard card-h p-5 flex items-center gap-4 text-left border-cor/40">
+      <button
+        onClick={async () => {
+          await authApi.signOut().catch(() => {});
+          clearSession();
+          nav(PATHS.home);
+        }}
+        className="w-full ncard card-h p-5 flex items-center gap-4 text-left border-cor/40"
+      >
         <span className="w-11 h-11 rounded-xl bg-[#3a1f1a] text-[#ff8a70] grid place-items-center shrink-0"><Icon name="logout" className="w-5 h-5" strokeWidth={1.9} /></span>
         <span className="flex-1">
           <span className="block font-disp font-bold text-[0.95rem] text-ntxt">Cerrar sesión</span>

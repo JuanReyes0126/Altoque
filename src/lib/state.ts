@@ -285,36 +285,18 @@ export const INCOMING_POOL: Omit<Incoming, "id" | "expiresIn">[] = [
 ];
 
 /* ─────────────────────────── store ─────────────────────────── */
-function loadSession(): Session | null {
-  try {
-    const raw = localStorage.getItem("altoque_session");
-    if (!raw) return null;
-    const p = JSON.parse(raw);
-    if (!p || typeof p.name !== "string") return null;
-    // compat con sesiones antiguas ({name, kind}) y nuevas ({name, role})
-    const role: Role | null =
-      p.role === "customer" || p.role === "provider" || p.role === "admin" ? p.role
-      : p.kind === "pro" ? "provider"
-      : p.kind === "client" ? "customer"
-      : null;
-    return role ? { name: p.name, role } : null;
-  } catch {
-    return null;
-  }
-}
-function persistSession(session: Session | null) {
-  try {
-    if (session) localStorage.setItem("altoque_session", JSON.stringify(session));
-    else localStorage.removeItem("altoque_session");
-  } catch { /* demo */ }
-}
-const persisted = loadSession();
-
+/*
+ * F1.8: la sesión es 100% del servidor (cookie HttpOnly de Better Auth).
+ * - NADA de autenticación en localStorage/sessionStorage.
+ * - `session` se llena con GET /api/v1/auth/get-session + /api/v1/me.
+ * - `role` es SOLO el modo de vista actual (cliente ↔ proveedor): no
+ *   concede privilegios — la autoridad es el backend (RBAC + ownership).
+ */
 let state: State = {
-  role: persisted?.role ?? "customer", zoneId: "cerros", favorites: ["p1", "p3", "p5"], jobs: [], inbox: [],
+  role: "customer", zoneId: "cerros", favorites: ["p1", "p3", "p5"], jobs: [], inbox: [],
   proActive: null, proAvailable: true, toastMsg: null, toastId: 0,
   proStats: { today: 4, earnings: 6350, week: [4200, 5800, 3900, 7200, 6350, 0, 0], acceptRate: 96 },
-  session: persisted,
+  session: null,
 };
 
 const listeners = new Set<() => void>();
@@ -324,11 +306,8 @@ export const subscribe = (l: () => void) => { listeners.add(l); return () => { l
 export function useApp(): State { return useSyncExternalStore(subscribe, getState); }
 
 export const toast = (msg: string) => set({ toastMsg: msg, toastId: state.toastId + 1 });
-export const setRole = (role: Role) => {
-  const session = state.session ? { ...state.session, role } : state.session;
-  persistSession(session);
-  set({ role, session });
-};
+/** Modo de vista (cliente ↔ proveedor). NO toca la sesión ni concede privilegios. */
+export const setRole = (role: Role) => set({ role });
 export const setZone = (zoneId: string) => set({ zoneId });
 export const toggleFav = (id: string) =>
   set({ favorites: state.favorites.includes(id) ? state.favorites.filter((f) => f !== id) : [...state.favorites, id] });
@@ -337,15 +316,11 @@ export const setProAvailable = (v: boolean) => {
   if (v) setTimeout(() => { if (state.proAvailable) toast("Estás visible para nuevas solicitudes"); }, 300);
 };
 
-/* ── sesión (mock — en F1 la reemplaza auth real del /server) ── */
-export function signIn(name: string, role: Role) {
-  const session: Session = { name: name.trim() || "María Peralta", role };
-  persistSession(session);
-  set({ session, role });
-  toast(role === "provider" ? "Bienvenido a tu panel profesional" : `Hola, ${session.name.split(" ")[0]} 👋`);
+/* ── sesión real (F1.8): solo el servidor la otorga; aquí se representa ── */
+export function setSession(session: Session | null) {
+  set({ session, role: session ? state.role : "customer" });
 }
-export function signOut() {
-  persistSession(null);
+export function clearSession() {
   set({ session: null, role: "customer" });
 }
 

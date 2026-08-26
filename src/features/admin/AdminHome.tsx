@@ -6,7 +6,8 @@
    ════════════════════════════════════════════════════════════════ */
 import { useNavigate } from "react-router-dom";
 import { Icon } from "../../components/icons";
-import { signOut, useApp } from "../../lib/state";
+import { clearSession, useApp } from "../../lib/state";
+import { authApi } from "../../lib/api";
 import { PATHS } from "../../lib/router";
 
 export function AdminHome() {
@@ -30,7 +31,14 @@ export function AdminHome() {
         </p>
         <div className="grid gap-2.5 mt-7">
           <button onClick={() => nav(PATHS.home)} className="btn-pine h-12 text-[0.9rem]">Volver al inicio</button>
-          <button onClick={() => { signOut(); nav(PATHS.home); }} className="btn-ghost h-12 text-[0.9rem]">Cerrar sesión</button>
+          <button
+            onClick={async () => {
+              await authApi.signOut().catch(() => {});
+              clearSession();
+              nav(PATHS.home);
+            }}
+            className="btn-ghost h-12 text-[0.9rem]"
+          >Cerrar sesión</button>
         </div>
       </div>
     </div>

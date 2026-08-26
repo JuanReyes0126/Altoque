@@ -8,7 +8,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { HashRouter, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { Icon } from "./components/icons";
-import { useApp, type Tab, type View } from "./lib/state";
+import { setSession, toast, useApp, type Tab, type View } from "./lib/state";
+import { authApi } from "./lib/api";
 import { PATHS, RequireRole, roleHome, tabPath, viewToPath } from "./lib/router";
 
 import { Landing } from "./features/landing/Landing";
@@ -121,7 +122,62 @@ function Toast() {
   );
 }
 
+/** Restauración de sesión al abrir/recargar (F1.8).
+ *  La fuente es SIEMPRE el servidor (cookie HttpOnly → get-session → /me).
+ *  También consume el enlace de verificación (?token=…) cuando llega por correo. */
+function useAuthBootstrap() {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const token = params.get("token");
+        if (token) {
+          try {
+            await authApi.verifyEmail(token);
+            toast("Correo verificado — bienvenida 👋");
+          } catch {
+            toast("El enlace de verificación no es válido o expiró");
+          }
+          params.delete("token");
+          const qs = params.toString();
+          window.history.replaceState({}, "", `${window.location.pathname}${qs ? "?" + qs : ""}${window.location.hash}`);
+        }
+        const session = await authApi.getSession();
+        if (!alive) return;
+        if (session) {
+          // /me es la fuente de verdad del perfil privado; si falla, la sesión vale igual.
+          try { setSession(await authApi.me()); } catch { setSession(session); }
+        }
+      } catch {
+        /* sin backend o sin cookie → estado público, sin sesión */
+      } finally {
+        if (alive) setReady(true);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+  return ready;
+}
+
+function AuthSplash() {
+  return (
+    <div className="min-h-dvh grid place-items-center bg-bg">
+      <div className="flex flex-col items-center gap-4 animate-fadein">
+        <span className="w-14 h-14 rounded-2xl bg-pine text-white grid place-items-center shadow-lift animate-pulse">
+          <Icon name="bolt" className="w-7 h-7" strokeWidth={2} />
+        </span>
+        <p className="font-disp font-bold text-xl tracking-tight text-ink">altoque<span className="text-sun">.</span></p>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
+  const ready = useAuthBootstrap();
+  if (!ready) return <AuthSplash />;
+
   return (
     <div className="p-root min-h-dvh">
       <HashRouter>
@@ -133,8 +189,10 @@ export default function App() {
           {/* cliente */}
           <Route path="/app/*" element={<RequireRole roles={["customer"]}><ClientShell /></RequireRole>} />
 
-          {/* proveedor */}
-          <Route path="/pro" element={<RequireRole roles={["provider"]}><ProApp /></RequireRole>} />
+          {/* proveedor — el modo pro es una capacidad de UI para cualquier cuenta
+              autenticada (modelo de doble capacidad); los PERMISOS reales los
+              decide el servidor en F3 (verification_status + RBAC). */}
+          <Route path="/pro" element={<RequireRole roles={["customer", "provider", "admin"]}><ProApp /></RequireRole>} />
 
           {/* admin (F4) */}
           <Route path="/admin" element={<RequireRole roles={["admin"]}><AdminHome /></RequireRole>} />

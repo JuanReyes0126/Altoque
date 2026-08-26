@@ -3,9 +3,10 @@ import { useNavigate } from "react-router-dom";
 import { Icon } from "../../components/icons";
 import { AvailDot, Face, FadeUp, JobPhoto, MapCard, ProListItem, Radar, RowHead, Stars, Verif, useFakeLoad } from "../../components/ui/kit";
 import {
-  CATS, JOB_IMGS, PROBLEMS, ZONES, advanceJob, catById, createJob, fmt, proById, prosByCat, rateJob,
-  setRole, signOut, toggleFav, useApp, zoneById, type Tab, type View,
+  CATS, JOB_IMGS, PROBLEMS, ZONES, advanceJob, catById, clearSession, createJob, fmt, proById, prosByCat, rateJob,
+  setRole, toggleFav, useApp, zoneById, type Tab, type View,
 } from "../../lib/state";
+import { authApi } from "../../lib/api";
 import { PATHS } from "../../lib/router";
 
 /* ════════════════ REQUEST WIZARD ════════════════ */
@@ -644,7 +645,15 @@ export function MeTab({ go, jump }: { go: (v: View) => void; jump: (t: Tab) => v
         <Icon name="arrow" className="w-4.5 h-4.5 text-pine shrink-0" strokeWidth={2.2} />
       </button>
 
-      <button onClick={() => { signOut(); nav(PATHS.home); }} className="w-full card card-h mt-4 p-5 flex items-center gap-4 text-left border-cor/30">
+      <button
+        onClick={async () => {
+          // F1.8: logout REAL — revoca la sesión en el servidor (cookie HttpOnly)
+          await authApi.signOut().catch(() => {});
+          clearSession(); // limpia SOLO el estado cliente derivado de la sesión
+          nav(PATHS.home);
+        }}
+        className="w-full card card-h mt-4 p-5 flex items-center gap-4 text-left border-cor/30"
+      >
         <span className="w-11 h-11 rounded-xl bg-corsoft text-cor grid place-items-center shrink-0"><Icon name="logout" className="w-5 h-5" strokeWidth={1.9} /></span>
         <span className="flex-1">
           <span className="block font-disp font-bold text-[0.95rem] text-ink">Cerrar sesión</span>

@@ -10,9 +10,18 @@ export type Role = "customer" | "provider" | "admin";
 /** RBAC administrativo — preparado desde el día 1 (solo SUPER_ADMIN gestiona roles admin). */
 export type AdminRole = "support" | "moderator" | "admin" | "super_admin";
 
+/**
+ * Sesión REAL (F1.8): proviene exclusivamente del servidor
+ * (GET /api/v1/auth/get-session + GET /api/v1/me). Nunca de localStorage.
+ * El rol lo define el backend — el frontend solo lo representa.
+ */
 export interface Session {
+  id: string;
   name: string;
+  email: string;
   role: Role;
+  status: string;
+  emailVerified: boolean;
   adminRole?: AdminRole;
 }
 

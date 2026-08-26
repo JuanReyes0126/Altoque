@@ -2,7 +2,9 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "../../components/icons";
 import { FadeUp, Toggle } from "../../components/ui/kit";
-import { CATS, ZONES, setProAvailable, signIn } from "../../lib/state";
+import { CATS, ZONES, setProAvailable } from "../../lib/state";
+import { authApi } from "../../lib/api";
+import { ApiHttpError } from "../../lib/http";
 import { PATHS } from "../../lib/router";
 
 const STEPS = ["Tu cuenta", "Tus servicios", "Tu zona", "Disponibilidad"];
@@ -12,27 +14,78 @@ export function ProviderOnboarding() {
   const nav = useNavigate();
   const [step, setStep] = useState(0);
   const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [pass, setPass] = useState("");
   const [cats, setCats] = useState<string[]>([]);
   const [zones, setZones] = useState<string[]>([]);
   const [available, setAvailable] = useState(true);
   const [docSent, setDocSent] = useState(false);
+  /** cuenta real creada en Neon, pendiente de verificación de correo */
+  const [doneEmail, setDoneEmail] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const toggle = (arr: string[], v: string, set: (x: string[]) => void) =>
     set(arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
 
+  const validEmail = /.+@.+\..+/.test(email.trim());
   const canNext =
-    step === 0 ? name.trim().length >= 2 && phone.trim().length >= 7
+    step === 0 ? name.trim().length >= 2 && validEmail && pass.length >= 8
     : step === 1 ? cats.length >= 1
     : step === 2 ? zones.length >= 1
     : true;
 
-  const next = () => {
+  const next = async () => {
     if (step < 3) { setStep(step + 1); window.scrollTo({ top: 0, behavior: "smooth" }); return; }
-    signIn(name, "provider");
-    setProAvailable(available);
-    nav(PATHS.pro);
+    if (busy) return;
+    setBusy(true); setError(null);
+    try {
+      // F1.8: la cuenta se crea DE VERDAD en PostgreSQL/Neon vía Better Auth.
+      // role queda "customer" en el servidor (input:false) — la capacidad de
+      // proveedor se activa con provider_profile + verificación en F3.
+      await authApi.signUp({ name: name.trim(), email: email.trim(), password: pass, ...(phone.trim() ? { phone: phone.trim() } : {}) });
+      setProAvailable(available);
+      setDoneEmail(email.trim());
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (e) {
+      const code = e instanceof ApiHttpError ? e.code : "ERROR";
+      setError(
+        code === "USER_ALREADY_EXISTS" ? "Este correo ya está registrado. Inicia sesión desde el inicio."
+        : code === "RATE_LIMITED" ? "Demasiados intentos. Espera unos minutos."
+        : e instanceof ApiHttpError ? e.message
+        : "No pudimos crear tu cuenta. Inténtalo de nuevo.",
+      );
+    } finally {
+      setBusy(false);
+    }
   };
+
+  if (doneEmail) {
+    return (
+      <div className="min-h-dvh grid place-items-center px-5">
+        <FadeUp className="max-w-md w-full">
+          <div className="card p-8 text-center">
+            <span className="w-16 h-16 rounded-2xl bg-pinesoft text-pine grid place-items-center mx-auto">
+              <Icon name="shield" className="w-8 h-8" strokeWidth={1.8} />
+            </span>
+            <h1 className="font-disp font-bold text-2xl tracking-tight text-ink mt-5">Tu cuenta fue creada</h1>
+            <p className="text-[0.9rem] text-mut font-medium leading-relaxed mt-3">
+              Confirmamos <strong className="text-ink">{doneEmail}</strong> en el sistema. Confirma tu correo con el enlace que recibas para activar tu sesión y entrar a tu panel.
+            </p>
+            <div className="card p-4 mt-5 text-left bg-tint/60 shadow-none">
+              <p className="text-[0.74rem] text-mut font-semibold leading-relaxed">
+                <span className="font-extrabold text-sun2">En Preview:</span> el enlace de verificación aparece en los <strong className="text-ink">Function Logs de Vercel</strong>. Una vez verifiques, podrás entrar al modo profesional desde tu perfil.
+              </p>
+            </div>
+            <button onClick={() => nav(PATHS.home)} className="btn-pine w-full h-13 mt-6 text-[0.95rem]">
+              Ir a iniciar sesión <Icon name="arrow" className="w-4.5 h-4.5" strokeWidth={2.2} />
+            </button>
+          </div>
+        </FadeUp>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-dvh flex flex-col">
@@ -71,12 +124,28 @@ export function ProviderOnboarding() {
                 <Field label="Nombre completo">
                   <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej. Carlos Rodríguez" className={inputCls} />
                 </Field>
-                <Field label="Teléfono">
+                <Field label="Correo electrónico">
+                  <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="tu@correo.com" className={inputCls} />
+                </Field>
+                <Field label="Teléfono (opcional)">
                   <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="809-555-0000" className={inputCls} />
                 </Field>
                 <Field label="Contraseña">
-                  <input type="password" placeholder="••••••••" className={inputCls} />
+                  <input value={pass} onChange={(e) => setPass(e.target.value)} type="password" placeholder="Mínimo 8 caracteres" className={inputCls} />
                 </Field>
+                {error && (
+                  <div className="rounded-xl bg-corsoft text-cor px-4 py-3 text-[0.8rem] font-bold flex items-start gap-2.5">
+                    <Icon name="alert" className="w-4 h-4 shrink-0 mt-0.5" strokeWidth={2.2} />
+                    <span>
+                      {error}
+                      {error.includes("ya está registrado") && (
+                        <button type="button" onClick={() => nav(PATHS.home)} className="block underline underline-offset-2 mt-1 text-[0.76rem]">
+                          Ir al inicio
+                        </button>
+                      )}
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div className="card p-4.5 p-5 mt-7 flex gap-3.5">

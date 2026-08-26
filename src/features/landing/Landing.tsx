@@ -3,8 +3,10 @@ import { useNavigate } from "react-router-dom";
 import { Icon } from "../../components/icons";
 import { AvailDot, Face, FadeUp, MapCard, Sheet, Stars, Toggle, Verif } from "../../components/ui/kit";
 import {
-  CATS, PROS, TICKER, ZONES, catById, fmt, prosByCat, searchAll, setIntent, signIn, useApp, zoneById, type View,
+  CATS, PROS, TICKER, ZONES, catById, fmt, prosByCat, searchAll, setIntent, setSession, useApp, zoneById, type View,
 } from "../../lib/state";
+import { authApi } from "../../lib/api";
+import { ApiHttpError } from "../../lib/http";
 import { PATHS, viewToPath } from "../../lib/router";
 
 /* ════════════════ helpers ════════════════ */
@@ -651,57 +653,154 @@ function ProviderMock() {
   );
 }
 
-/* ════════════════ auth sheet ════════════════ */
+/* ════════════════ auth sheet (F1.8 · Better Auth real) ════════════════ */
 function AuthSheet({ auth, onClose }: { auth: AuthState; onClose: () => void }) {
   const nav = useNavigate();
   const [mode, setMode] = useState<"login" | "signup">("signup");
   const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [pass, setPass] = useState("");
-  const { session } = useApp();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<{ code: string; message: string } | null>(null);
+  /** cuenta creada pendiente de verificación de correo */
+  const [pendingEmail, setPendingEmail] = useState<string | null>(null);
+  const [resent, setResent] = useState(false);
 
   // sincroniza modo cuando se abre
   const [lastOpen, setLastOpen] = useState(false);
-  if (auth && !lastOpen) { setLastOpen(true); setMode(auth.mode); }
+  if (auth && !lastOpen) { setLastOpen(true); setMode(auth.mode); setError(null); setPendingEmail(null); setResent(false); }
   if (!auth && lastOpen) setLastOpen(false);
 
-  const submit = (e: FormEvent) => {
+  const fail = (e: unknown, fallback: string) => {
+    const code = e instanceof ApiHttpError ? e.code : "ERROR";
+    const raw = e instanceof ApiHttpError ? e.message : fallback;
+    const message =
+      code === "USER_ALREADY_EXISTS" ? "Este correo ya está registrado. Inicia sesión."
+      : code === "INVALID_EMAIL_OR_PASSWORD" ? "Correo o contraseña incorrectos."
+      : code === "EMAIL_NOT_VERIFIED" ? "Tu correo aún no está verificado. Revisa tu bandeja de entrada."
+      : code === "RATE_LIMITED" ? "Demasiados intentos. Espera unos minutos."
+      : raw;
+    setError({ code, message });
+  };
+
+  const submit = async (e: FormEvent) => {
     e.preventDefault();
-    const intent = auth?.intent ?? null;
-    signIn(mode === "signup" ? name || "María Peralta" : name || session?.name || "María Peralta", "customer");
-    setName(""); setPhone(""); setPass("");
-    onClose();
-    nav(intent ? viewToPath(intent) : PATHS.app);
+    if (busy) return;
+    setBusy(true); setError(null);
+    try {
+      if (mode === "signup") {
+        await authApi.signUp({ name: name.trim(), email: email.trim(), password: pass, ...(phone.trim() ? { phone: phone.trim() } : {}) });
+        // requireEmailVerification: la cuenta existe en Neon, pero NO hay sesión
+        // hasta verificar el correo. Sin proveedor de email (F2) el enlace se
+        // imprime en los Function Logs de Vercel.
+        setPendingEmail(email.trim());
+        setName(""); setPass("");
+      } else {
+        const session = await authApi.signIn({ email: email.trim(), password: pass });
+        const intent = auth?.intent ?? null;
+        setIntent(intent);   // ANTES de setSession: el shell lee el intent al montar
+        setSession(session);
+        setPass("");
+        onClose();
+        nav(intent ? viewToPath(intent) : PATHS.app);
+      }
+    } catch (e) {
+      fail(e, "No pudimos completar la operación. Inténtalo de nuevo.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resend = async () => {
+    const target = pendingEmail ?? email.trim();
+    if (!target) return;
+    try {
+      await authApi.resendVerification(target);
+      setResent(true);
+    } catch {
+      setError({ code: "ERROR", message: "No pudimos reenviar el correo. Inténtalo de nuevo." });
+    }
   };
 
   return (
-    <Sheet open={!!auth} onClose={onClose} title={mode === "signup" ? "Crea tu cuenta" : "Bienvenido de vuelta"}>
-      <div className="grid grid-cols-2 gap-1 p-1 rounded-full bg-tint mb-5">
-        {(["signup", "login"] as const).map((m) => (
-          <button
-            key={m}
-            onClick={() => setMode(m)}
-            className={`h-10 rounded-full text-[0.82rem] font-extrabold transition-all ${mode === m ? "bg-ink text-white shadow-card" : "text-mut"}`}
-          >
-            {m === "signup" ? "Registrarme" : "Iniciar sesión"}
-          </button>
-        ))}
-      </div>
+    <Sheet open={!!auth} onClose={onClose} title={pendingEmail ? "Verifica tu correo" : mode === "signup" ? "Crea tu cuenta" : "Bienvenido de vuelta"}>
+      {pendingEmail ? (
+        <div className="text-center py-2">
+          <span className="w-16 h-16 rounded-2xl bg-pinesoft text-pine grid place-items-center mx-auto">
+            <Icon name="doc" className="w-8 h-8" strokeWidth={1.8} />
+          </span>
+          <p className="font-disp font-bold text-lg text-ink mt-5">Te enviamos un correo</p>
+          <p className="text-[0.85rem] text-mut font-medium leading-relaxed mt-2 max-w-xs mx-auto">
+            Tu cuenta <strong className="text-ink">{pendingEmail}</strong> fue creada. Confirma tu correo con el enlace que recibas para activar tu sesión.
+          </p>
+          <div className="card p-4 mt-5 text-left">
+            <p className="text-[0.74rem] text-mut font-semibold leading-relaxed">
+              <span className="font-extrabold text-sun2">En Preview:</span> aún no hay proveedor de email — el enlace de verificación aparece en los <strong className="text-ink">Function Logs de Vercel</strong> como <code className="text-[0.68rem] bg-tint px-1.5 py-0.5 rounded">[altoque:email]</code>.
+            </p>
+          </div>
+          <div className="grid gap-2.5 mt-5">
+            <button onClick={() => { setPendingEmail(null); setMode("login"); }} className="btn-pine w-full h-12 text-[0.9rem]">
+              Ya verifiqué — iniciar sesión
+            </button>
+            <button onClick={resend} className="btn-ghost w-full h-12 text-[0.9rem]">
+              {resent ? "Correo reenviado ✓" : "Reenviar correo"}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-1 p-1 rounded-full bg-tint mb-5">
+            {(["signup", "login"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => { setMode(m); setError(null); }}
+                className={`h-10 rounded-full text-[0.82rem] font-extrabold transition-all ${mode === m ? "bg-ink text-white shadow-card" : "text-mut"}`}
+              >
+                {m === "signup" ? "Registrarme" : "Iniciar sesión"}
+              </button>
+            ))}
+          </div>
 
-      <form onSubmit={submit} className="space-y-3">
-        {mode === "signup" && (
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nombre completo" className="w-full h-13 rounded-xl border border-line bg-paper px-4 font-semibold outline-none focus:border-pine transition-colors" />
-        )}
-        <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Teléfono o correo" className="w-full h-13 rounded-xl border border-line bg-paper px-4 font-semibold outline-none focus:border-pine transition-colors" />
-        <input value={pass} onChange={(e) => setPass(e.target.value)} type="password" placeholder="Contraseña" className="w-full h-13 rounded-xl border border-line bg-paper px-4 font-semibold outline-none focus:border-pine transition-colors" />
-        <button type="submit" className="btn-pine w-full h-13 text-[0.95rem]">
-          {mode === "signup" ? "Crear cuenta y entrar" : "Entrar"} <Icon name="arrow" className="w-4.5 h-4.5" strokeWidth={2.2} />
-        </button>
-      </form>
+          <form onSubmit={submit} className="space-y-3">
+            {mode === "signup" && (
+              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nombre completo" required className="w-full h-13 rounded-xl border border-line bg-paper px-4 font-semibold outline-none focus:border-pine transition-colors" />
+            )}
+            <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="Correo electrónico" required className="w-full h-13 rounded-xl border border-line bg-paper px-4 font-semibold outline-none focus:border-pine transition-colors" />
+            {mode === "signup" && (
+              <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Teléfono (opcional)" className="w-full h-13 rounded-xl border border-line bg-paper px-4 font-semibold outline-none focus:border-pine transition-colors" />
+            )}
+            <input value={pass} onChange={(e) => setPass(e.target.value)} type="password" placeholder="Contraseña (mínimo 8 caracteres)" required minLength={8} className="w-full h-13 rounded-xl border border-line bg-paper px-4 font-semibold outline-none focus:border-pine transition-colors" />
 
-      <p className="text-center text-[0.72rem] text-soft font-semibold mt-4 leading-relaxed">
-        Prototipo: cualquier dato te deja entrar.<br />Sin tarjeta, sin compromiso.
-      </p>
+            {error && (
+              <div className="rounded-xl bg-corsoft text-cor px-4 py-3 text-[0.8rem] font-bold flex items-start gap-2.5">
+                <Icon name="alert" className="w-4 h-4 shrink-0 mt-0.5" strokeWidth={2.2} />
+                <span>
+                  {error.message}
+                  {error.code === "EMAIL_NOT_VERIFIED" && (
+                    <button type="button" onClick={resend} className="block underline underline-offset-2 mt-1 text-[0.76rem]">
+                      {resent ? "Correo reenviado ✓" : "Reenviar correo de verificación"}
+                    </button>
+                  )}
+                  {error.code === "USER_ALREADY_EXISTS" && (
+                    <button type="button" onClick={() => { setMode("login"); setError(null); }} className="block underline underline-offset-2 mt-1 text-[0.76rem]">
+                      Ir a iniciar sesión
+                    </button>
+                  )}
+                </span>
+              </div>
+            )}
+
+            <button type="submit" disabled={busy} className="btn-pine w-full h-13 text-[0.95rem] disabled:opacity-60">
+              {busy ? "Un momento…" : mode === "signup" ? "Crear cuenta" : "Entrar"} {!busy && <Icon name="arrow" className="w-4.5 h-4.5" strokeWidth={2.2} />}
+            </button>
+          </form>
+
+          <p className="text-center text-[0.72rem] text-soft font-semibold mt-4 leading-relaxed">
+            Sesión segura con cookies protegidas. Sin tarjeta, sin compromiso.
+          </p>
+        </>
+      )}
     </Sheet>
   );
 }
