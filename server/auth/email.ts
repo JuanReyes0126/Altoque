@@ -8,6 +8,7 @@
  */
 import { log } from "../lib/logger.js";
 import { env } from "../config/env.js";
+import { diagEnabled, redactEmail } from "../lib/diag.js";
 
 export interface OutgoingEmail {
   to: string;
@@ -16,12 +17,21 @@ export interface OutgoingEmail {
 }
 
 export async function sendEmail(email: OutgoingEmail): Promise<void> {
+  // ⚠️ TEMPORAL (debug F1.8): demuestra en logs que sendEmail retorna de
+  // inmediato (no espera transporte externo) cuando no hay RESEND_API_KEY.
+  const t0 = Date.now();
   const e = env();
   if (!e.RESEND_API_KEY) {
     // Dev/test: consola. El contenido lleva token — aceptable SOLO local.
     console.info(
       `[altoque:email] → ${email.to}\n  asunto: ${email.subject}\n  ${email.text.split("\n").join("\n  ")}`,
     );
+    if (diagEnabled()) {
+      log.info("[diag] sendEmail (sin RESEND_API_KEY) → retorno inmediato", {
+        durationMs: Date.now() - t0,
+        to: redactEmail(email.to),
+      });
+    }
     return;
   }
   // F2: fetch("https://api.resend.com/emails") con RESEND_API_KEY,

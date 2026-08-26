@@ -16,6 +16,7 @@ import { accessLog, originCheck, requestId, securityHeaders } from "./middleware
 import { AppError } from "./lib/errors.js";
 import { err } from "./lib/envelope.js";
 import { log } from "./lib/logger.js";
+import { diagEnabled } from "./lib/diag.js";
 import { healthRoutes } from "./routes/health.js";
 import { categoryRoutes } from "./routes/categories.js";
 import { meRoutes } from "./routes/me.js";
@@ -31,7 +32,20 @@ app.use("/api/v1/*", originCheck);
 // ── Better Auth: registro, verificación, login, logout, sesiones,
 //    forgot/reset password. Montado en /api/v1/auth/*.
 //    (Better Auth aplica su propio rate limit interno + el edge de Vercel.)
-app.on(["GET", "POST"], "/api/v1/auth/*", (c) => auth.handler(c.req.raw));
+//
+// ⚠️ TEMPORAL (debug F1.8): con ALTOQUE_DIAG=1 se registra el momento en que
+// la petición ENTRA a Better Auth. Si este log aparece pero el accessLog
+// ("request") de security.ts NO aparece, el hang está DENTRO de auth.handler.
+app.on(["GET", "POST"], "/api/v1/auth/*", async (c) => {
+  if (diagEnabled()) {
+    log.info("[diag] auth.handler → start", {
+      requestId: c.get("requestId"),
+      method: c.req.method,
+      path: c.req.path,
+    });
+  }
+  return auth.handler(c.req.raw);
+});
 
 // ── dominio F1 ──
 app.route("/api/v1", healthRoutes);

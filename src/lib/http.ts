@@ -16,6 +16,11 @@
  *  En Vercel queda vacío: mismo origen, sin CORS. */
 const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? "";
 
+/** Protección UX (F1.8): si el servidor no responde en este plazo, la UI
+ *  deja de quedar colgada en "Un momento…" y muestra un error legible.
+ *  NO es la solución del signup — solo evita un hang infinito del cliente. */
+const REQUEST_TIMEOUT_MS = 15_000;
+
 export class ApiHttpError extends Error {
   readonly status: number;
   readonly code: string;
@@ -35,6 +40,8 @@ interface RequestOptions {
 }
 
 export async function http<T>(path: string, opts: RequestOptions = {}): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   let res: Response;
   try {
     res = await fetch(`${API_BASE}${path}`, {
@@ -42,10 +49,18 @@ export async function http<T>(path: string, opts: RequestOptions = {}): Promise<
       credentials: "include",
       headers: opts.body !== undefined ? { "Content-Type": "application/json" } : undefined,
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+      signal: controller.signal,
     });
-  } catch {
+  } catch (e) {
+    // Timeout: el servidor aceptó la conexión pero no respondió a tiempo.
+    // Distinto de NETWORK_ERROR (no hubo conexión / backend caído).
+    if (e instanceof DOMException && e.name === "AbortError") {
+      throw new ApiHttpError(0, "REQUEST_TIMEOUT", "Altoque tardó demasiado en responder. Inténtalo nuevamente.");
+    }
     // fallo de red / backend caído
     throw new ApiHttpError(0, "NETWORK_ERROR", "No pudimos conectar con Altoque. Revisa tu conexión e inténtalo de nuevo.");
+  } finally {
+    clearTimeout(timer);
   }
 
   if (opts.noContent) {
