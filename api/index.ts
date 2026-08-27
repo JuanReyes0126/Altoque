@@ -1,133 +1,99 @@
 /**
  * ALTOQUE · Vercel Function — borde dual Web/Node (F1.8)
  *
- * vercel.json reescribe /api/v1/* → /api (esta función). El frontend y el
- * API comparten origen, así las cookies HttpOnly/SameSite=Lax y el chequeo
- * de Origen funcionan sin CORS (v1.1 §18).
+ * ¿Por qué existe? Este deployment es invocado con la firma LEGADA de
+ * Vercel/Node, (req: IncomingMessage, res: ServerResponse) => void, donde la
+ * respuesta se ESCRIBE en `res` y devolver un `Response` dispara el warning
+ * "default export returned a 'Response'". Los adaptadores puros fallan cada
+ * uno en un lado: @hono/node-server/vercel lee el cuerpo del socket vivo y
+ * cuelga (timeout 300 s) si el puente ya lo drenó; hono/vercel devuelve un
+ * Response incompatible con la firma legada.
  *
- * Runtime Node (no Edge): el PrismaClient estándar lo requiere.
+ * Este borde detecta la convención en runtime:
+ *  - (IncomingMessage, ServerResponse) → lee el cuerpo UNA vez, construye un
+ *    Request Web, ejecuta Hono y vuelca la Response en `res`. Devuelve void.
+ *  - (Request) → flujo Web nativo Request -> Response.
  *
- * ¿POR QUÉ EXISTE ESTE BORDE DUAL?
- * Este proyecto se ha observado desplegado bajo la convención LEGADA de
- * Vercel/Node, que invoca el default export con la firma
- *   (req: IncomingMessage, res: ServerResponse) => void
- * donde la respuesta se ESCRIBE en `res` y no se devuelve nada. Devolver un
- * Web `Response` desde esa firma dispara el warning
- *   "default export returned a 'Response' ..."
- * Por otro lado, un runtime moderno invoca la firma Web
- *   (req: Request) => Response | Promise<Response>.
- *
- * Los dos adaptadores "puros" fallan cada uno en un lado:
- *  - `@hono/node-server/vercel` lee el cuerpo del socket VIVO; si el puente
- *    ya drenó el cuerpo, `request.json()` espera un EOF que nunca llega
- *    (FUNCTION_INVOCATION_TIMEOUT).
- *  - `hono/vercel` devuelve un `Response`, incompatible con la firma legada.
- *
- * Este archivo adapta DINÁMICAMENTE según la convención de invocación:
- *  - Si recibe `(IncomingMessage, ServerResponse)` → lee el cuerpo completo,
- *    construye un `Request` Web, ejecuta la app Hono y VUELCA la `Response`
- *    en `res` (status, headers —incluido Set-Cookie múltiple— y cuerpo).
- *    Devuelve `void` → sin warning.
- *  - Si recibe un `Request` Web → flujo nativo `Request -> Response`.
- *
- * Hono sigue trabajando internamente con Web Standards; las rutas y la
- * lógica de la app NO se alteran.
- *
- * `bodyParser: false` evita que el puente de Vercel consuma el cuerpo antes
- * de tiempo, de modo que este borde lo lee exactamente UNA vez.
+ * Hono conserva Web Standards; rutas y lógica de la app sin alterar.
+ * bodyParser:false evita que el puente pre-consuma el cuerpo.
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { app } from "../server/index.js";
 
-// Impide que el puente de Vercel pre-consuma el cuerpo; lo leemos aquí una vez.
-export const config = {
-  api: { bodyParser: false },
-};
+// El puente de Vercel no debe pre-consumer el cuerpo; lo leemos aquí una vez.
+export const config = { api: { bodyParser: false } };
 
-// Límites defensivos: nunca dejar la función colgada ni sin límite de memoria.
-const BODY_READ_TIMEOUT_MS = 10_000;
-const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10 MB
+type FetchApp = { fetch: (request: Request, env?: unknown) => Response | Promise<Response> };
 
-/** Detecta la convención legada: el 2.º argumento es un `ServerResponse`. */
-function isServerResponse(x: unknown): x is ServerResponse {
-  return (
-    typeof x === "object" &&
-    x !== null &&
-    typeof (x as ServerResponse).writeHead === "function" &&
-    typeof (x as ServerResponse).end === "function"
-  );
+export interface EdgeOptions {
+  bodyTimeoutMs?: number;
+  maxBodyBytes?: number;
 }
 
-/**
- * Lee el cuerpo completo del `IncomingMessage` exactamente una vez.
- * Devuelve `undefined` para GET/HEAD o si no hay datos (POST vacío).
- * Acotado por timeout y tamaño máximo para no colgar la función.
- */
-async function readBody(req: IncomingMessage): Promise<Uint8Array | undefined> {
+const isServerResponse = (x: unknown): x is ServerResponse =>
+  !!x &&
+  typeof (x as ServerResponse).writeHead === "function" &&
+  typeof (x as ServerResponse).end === "function";
+
+/** Lee el cuerpo completo exactamente una vez. undefined para GET/HEAD o vacío. */
+async function readBody(
+  req: IncomingMessage,
+  maxBodyBytes: number,
+  bodyTimeoutMs: number,
+): Promise<Uint8Array | undefined> {
   const method = (req.method || "GET").toUpperCase();
   if (method === "GET" || method === "HEAD") return undefined;
 
   const chunks: Buffer[] = [];
   let total = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
 
   const readAll = (async () => {
     for await (const chunk of req) {
-      const buf = chunk as Buffer;
-      total += buf.length;
-      if (total > MAX_BODY_BYTES) throw new Error("PAYLOAD_TOO_LARGE");
-      chunks.push(buf);
+      total += (chunk as Buffer).length;
+      if (total > maxBodyBytes) throw new Error("PAYLOAD_TOO_LARGE");
+      chunks.push(chunk as Buffer);
     }
   })();
 
   const timeout = new Promise<never>((_, reject) => {
-    const t = setTimeout(() => reject(new Error("BODY_READ_TIMEOUT")), BODY_READ_TIMEOUT_MS);
-    // No retener el proceso si todo lo demás ya terminó.
-    if (typeof t.unref === "function") t.unref();
+    timer = setTimeout(() => reject(new Error("BODY_READ_TIMEOUT")), bodyTimeoutMs);
   });
 
-  await Promise.race([readAll, timeout]);
-
-  return chunks.length === 0 ? undefined : Buffer.concat(chunks);
+  try {
+    await Promise.race([readAll, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer); // cleanup correcto del timeout
+  }
+  return chunks.length ? Buffer.concat(chunks) : undefined;
 }
 
-/**
- * Convierte los headers de Node a `Headers` preservando duplicados
- * (p. ej. múltiples `Cookie`). Usa `rawHeaders` (pares planos) para no
- * perder repeticiones que `req.headers` colapsaría.
- */
+/** Headers Node -> Headers preservando duplicados (rawHeaders, pares planos). */
 function toWebHeaders(req: IncomingMessage): Headers {
   const headers = new Headers();
   const raw = req.rawHeaders;
-  for (let i = 0; i + 1 < raw.length; i += 2) {
-    headers.append(raw[i], raw[i + 1]);
-  }
+  for (let i = 0; i + 1 < raw.length; i += 2) headers.append(raw[i], raw[i + 1]);
   return headers;
 }
 
-/**
- * Construye un `Request` Web absoluto a partir del `IncomingMessage`.
- * El protocolo/host se derivan de `x-forwarded-*` (Vercel) o del host.
- */
+/** IncomingMessage -> Request Web absoluto (proto/host desde x-forwarded-*). */
 function buildRequest(req: IncomingMessage, body: Uint8Array | undefined): Request {
-  const fwdProto = (req.headers["x-forwarded-proto"] as string | undefined)?.split(",")[0].trim();
-  const fwdHost = (req.headers["x-forwarded-host"] as string | undefined)?.split(",")[0].trim();
-  const proto = fwdProto || "https";
-  const host = fwdHost || (req.headers["host"] as string | undefined) || "localhost";
-  const url = `${proto}://${host}${req.url || "/"}`;
-
+  const fwd = (k: string) => (req.headers[k] as string | undefined)?.split(",")[0].trim();
+  const proto = fwd("x-forwarded-proto") || "https";
+  const host = fwd("x-forwarded-host") || (req.headers.host as string) || "localhost";
   const method = (req.method || "GET").toUpperCase();
   const headers = toWebHeaders(req);
-
-  // Solo adjuntar cuerpo para métodos que lo admiten; GET/HEAD lanzarían.
-  if (body !== undefined && method !== "GET" && method !== "HEAD") {
-    return new Request(url, { method, headers, body, duplex: "half" });
-  }
-  return new Request(url, { method, headers });
+  const hasBody = body !== undefined && method !== "GET" && method !== "HEAD";
+  return new Request(`${proto}://${host}${req.url || "/"}`, {
+    method,
+    headers,
+    ...(hasBody ? { body, duplex: "half" as const } : {}),
+  });
 }
 
 /**
- * Vuelca una `Response` Web en el `ServerResponse` de la firma legada:
- * status, headers (preservando múltiples `Set-Cookie`) y cuerpo.
+ * Response Web -> ServerResponse: status, headers (Set-Cookie múltiple sin
+ * concatenar) y cuerpo. Siempre termina `res`.
  */
 async function writeResponse(web: Response, res: ServerResponse): Promise<void> {
   if (res.writableEnded || res.destroyed) return;
@@ -135,36 +101,29 @@ async function writeResponse(web: Response, res: ServerResponse): Promise<void> 
   res.statusCode = web.status;
   if (web.statusText) res.statusMessage = web.statusText;
 
-  // Headers. `Headers.entries()` colapsa `set-cookie`; se maneja aparte.
-  const hasGetSetCookie = typeof web.headers.getSetCookie === "function";
-  const setCookies = hasGetSetCookie ? web.headers.getSetCookie() : [];
-
+  // Headers.entries() colapsa set-cookie; se maneja aparte para no concatenarlo.
+  const setCookies =
+    typeof web.headers.getSetCookie === "function" ? web.headers.getSetCookie() : null;
   for (const [key, value] of web.headers) {
-    if (key.toLowerCase() === "set-cookie") continue; // manejado abajo
+    if (key.toLowerCase() === "set-cookie") continue;
     res.setHeader(key, value);
   }
-  if (setCookies.length > 0) {
-    // setHeader acepta un array → preserva cada cookie por separado.
-    res.setHeader("set-cookie", setCookies);
-  } else if (!hasGetSetCookie) {
-    // Fallback (Node antiguo sin getSetCookie): una sola cabecera.
-    const single = web.headers.get("set-cookie");
+  if (setCookies && setCookies.length) {
+    res.setHeader("set-cookie", setCookies); // array → cada cookie por separado
+  } else if (setCookies === null) {
+    const single = web.headers.get("set-cookie"); // fallback Node antiguo
     if (single) res.setHeader("set-cookie", single);
   }
 
-  // Cuerpo. Sin `await drain`: las respuestas del API son pequeñas y esto
-  // evita cualquier vector de cuelgue (requisito: nunca colgar).
   if (!web.body || web.bodyUsed) {
     res.end();
     return;
   }
-
   const reader = web.body.getReader();
   try {
     for (;;) {
       const { done, value } = await reader.read();
-      if (done) break;
-      if (res.destroyed) break;
+      if (done || res.destroyed) break;
       res.write(value);
     }
   } finally {
@@ -173,70 +132,53 @@ async function writeResponse(web: Response, res: ServerResponse): Promise<void> 
   if (!res.writableEnded) res.end();
 }
 
-/** Respuesta de error genérica; no fuga detalles internos. */
-function errorResponse(status: number, code: string): Response {
-  return new Response(JSON.stringify({ error: { code, message: code } }), {
+const errorJson = (status: number, code: string) =>
+  new Response(JSON.stringify({ error: { code, message: code } }), {
     status,
     headers: { "content-type": "application/json" },
   });
-}
 
-/** Camino legado `(IncomingMessage, ServerResponse)`: escribe en `res`, devuelve void. */
-async function handleLegacy(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  let webResponse: Response;
-  try {
-    const body = await readBody(req);
-    const request = buildRequest(req, body);
-    // Se pasa `{ incoming, outgoing }` como env para que el diagnóstico del
-    // servidor (c.env.incoming) siga funcionando bajo esta convención.
-    webResponse = await app.fetch(request, { incoming: req, outgoing: res });
-  } catch (err) {
-    console.error("[altoque:api] error manejando request:", err);
-    const code =
-      err instanceof Error && err.message === "PAYLOAD_TOO_LARGE"
-        ? "PAYLOAD_TOO_LARGE"
-        : err instanceof Error && err.message === "BODY_READ_TIMEOUT"
-          ? "BODY_READ_TIMEOUT"
-          : "INTERNAL_ERROR";
-    webResponse =
-      code === "PAYLOAD_TOO_LARGE"
-        ? errorResponse(413, code)
-        : code === "BODY_READ_TIMEOUT"
-          ? errorResponse(408, code)
-          : errorResponse(500, code);
-  }
+export function createEdgeHandler(application: FetchApp, opts: EdgeOptions = {}) {
+  const maxBodyBytes = opts.maxBodyBytes ?? 10 * 1024 * 1024; // 10 MB
+  const bodyTimeoutMs = opts.bodyTimeoutMs ?? 10_000;
 
-  try {
-    await writeResponse(webResponse, res);
-  } catch (writeErr) {
-    console.error("[altoque:api] error escribiendo respuesta:", writeErr);
-    if (!res.writableEnded && !res.destroyed) {
-      try {
+  return (async (
+    reqOrIncoming: Request | IncomingMessage,
+    maybeRes?: ServerResponse,
+  ): Promise<Response | void> => {
+    // Convención Web nativa: Request -> Response (sin adaptador).
+    if (!maybeRes || !isServerResponse(maybeRes)) {
+      return application.fetch(reqOrIncoming as Request);
+    }
+
+    // Convención legada (IncomingMessage, ServerResponse): escribe en res, void.
+    const req = reqOrIncoming as IncomingMessage;
+    const res = maybeRes;
+    let web: Response;
+    try {
+      const body = await readBody(req, maxBodyBytes, bodyTimeoutMs);
+      web = await application.fetch(buildRequest(req, body), { incoming: req, outgoing: res });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      web =
+        msg === "PAYLOAD_TOO_LARGE"
+          ? errorJson(413, msg)
+          : msg === "BODY_READ_TIMEOUT"
+            ? errorJson(408, msg)
+            : errorJson(500, "INTERNAL_ERROR");
+    }
+
+    try {
+      await writeResponse(web, res);
+    } catch {
+      // Garantizar que res siempre termina, incluso si el vuelco falla.
+      if (!res.writableEnded && !res.destroyed) {
         res.statusCode = 500;
         res.end();
-      } catch {
-        /* noop */
       }
     }
-  }
+  }) as unknown as ((req: IncomingMessage, res: ServerResponse) => void | Promise<void>) &
+    ((req: Request) => Response | Promise<Response>);
 }
 
-/**
- * Default export dual:
- *  - firma legada `(req, res)` → maneja y devuelve `void` (sin warning);
- *  - firma Web `(req)` → devuelve la `Response` nativa.
- */
-const handler = (async (
-  reqOrIncoming: Request | IncomingMessage,
-  maybeRes?: ServerResponse,
-): Promise<Response | void> => {
-  if (maybeRes && isServerResponse(maybeRes)) {
-    await handleLegacy(reqOrIncoming as IncomingMessage, maybeRes);
-    return; // void → convención legada, sin warning
-  }
-  // Convención Web nativa: Request -> Response.
-  return app.fetch(reqOrIncoming as Request);
-}) as unknown as ((req: IncomingMessage, res: ServerResponse) => void | Promise<void>) &
-  ((req: Request) => Response | Promise<Response>);
-
-export default handler;
+export default createEdgeHandler(app);
