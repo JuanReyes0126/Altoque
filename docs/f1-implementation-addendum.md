@@ -86,7 +86,7 @@ Este test se escribe **en F1**, no se pospone. Si no pasa, F1 no se cierra.
 
 ### 2.5 Versiones de esta decisión
 
-- `prisma` y `@prisma/client`: **misma línea 8.x, mismo patch exacto** (si la versión pineada de Better Auth exigiera una línea Prisma inferior por compatibilidad de su adaptador, se pinea esa y se documenta el motivo).
+- `prisma` y `@prisma/client`: **6.19.3, mismo patch exacto en ambos** (es la línea instalada y compatible con Better Auth 1.7.1; si una futura actualización de Better Auth exigiera otra línea Prisma, se pinea esa y se documenta el motivo).
 - `prisma.config.ts` apunta a `DIRECT_DATABASE_URL`; el runtime usa `DATABASE_URL` vía `datasourceUrl`.
 
 ---
@@ -178,7 +178,7 @@ Política: **versiones exactas en `package.json` (sin `^`, sin `~`, sin `*`, sin
 | Componente | Línea objetivo | Nota |
 |---|---|---|
 | **Node.js** | 22 LTS | `engines` en package.json + `.nvmrc` + runtime Vercel `nodejs22.x` |
-| **prisma / @prisma/client** | 8.x (mismo patch ambos) | o la línea que la versión de Better Auth requiera; se documenta si ocurre |
+| **prisma / @prisma/client** | 6.19.3 (mismo patch ambos) | o la línea que la versión de Better Auth requiera; se documenta si ocurre |
 | **@prisma/adapter-neon** | — | **no se instala** (§2.1) |
 | **@neondatabase/serverless** | — | no se instala (el engine estándar de Prisma gestiona la conexión) |
 | **better-auth** | 1.x estable | patch exacto fijado en paso 0; `@better-auth/cli generate` contra esa versión |
