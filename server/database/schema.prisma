@@ -165,6 +165,7 @@ model account {
   id                    String    @id @default(cuid())
   accountId             String
   providerId            String
+  issuer                String?
   userId                String
   user                  user      @relation(fields: [userId], references: [id], onDelete: Cascade)
   accessToken           String?
