@@ -513,11 +513,6 @@ export function TrackingView({ jobId, go, jump }: { jobId: string; go: (v: View)
             <section className="card p-6 mt-5">
               <p className="text-[0.68rem] font-extrabold tracking-[0.18em] text-soft uppercase mb-4">Estado del servicio</p>
               <Timeline status={job.status} />
-              {job.status !== "done" && (
-                <button onClick={() => advanceJob(job.id)} className="w-full mt-5 text-[0.72rem] font-bold text-soft hover:text-pine underline underline-offset-4 transition-colors">
-                  Avanzar demo → siguiente estado
-                </button>
-              )}
             </section>
           </FadeUp>
 
@@ -546,7 +541,15 @@ export function TrackingView({ jobId, go, jump }: { jobId: string; go: (v: View)
                       ))}
                     </div>
                     <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="Cuéntanos cómo fue el servicio…" rows={3} className="mt-4 w-full card p-4 text-[0.88rem] font-medium text-ink placeholder:text-soft outline-none focus:border-pine/50 resize-none" />
-                    <button onClick={() => { rateJob(job.id, rating, text); setSent(true); }} disabled={!rating} className="btn-pine w-full h-13 py-3.5 text-[0.88rem] mt-4">
+                    <button onClick={async () => {
+                      try {
+                        await api.requests.review(job.id, { rating, comment: text });
+                        setSent(true);
+                      } catch (error) {
+                        console.error("Error submitting review:", error);
+                        // TODO: Mostrar error al usuario
+                      }
+                    }} disabled={!rating} className="btn-pine w-full h-13 py-3.5 text-[0.88rem] mt-4">
                       Enviar reseña
                     </button>
                   </>
@@ -566,7 +569,16 @@ export function TrackingView({ jobId, go, jump }: { jobId: string; go: (v: View)
             <p className="text-[0.82rem] text-mut font-medium mt-2 leading-relaxed">Si el profesional ya va en camino, cancelar podría generar un cargo en el futuro.</p>
             <div className="flex gap-3 mt-5">
               <button onClick={() => setCancelOpen(false)} className="btn-ghost flex-1 h-12 text-[0.85rem]">Seguir</button>
-              <button onClick={() => { setCancelOpen(false); jump("jobs"); }} className="flex-1 h-12 rounded-[14px] bg-cor text-white font-bold text-[0.85rem] active:scale-95 transition-transform">Cancelar servicio</button>
+              <button onClick={async () => {
+                try {
+                  await api.requests.cancel(job.id);
+                  setCancelOpen(false);
+                  jump("jobs");
+                } catch (error) {
+                  console.error("Error canceling request:", error);
+                  // TODO: Mostrar error al usuario
+                }
+              }} className="flex-1 h-12 rounded-[14px] bg-cor text-white font-bold text-[0.85rem] active:scale-95 transition-transform">Cancelar servicio</button>
             </div>
           </div>
         </div>

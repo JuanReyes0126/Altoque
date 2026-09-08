@@ -353,14 +353,9 @@ export function createJob(data: { catId: string; problem: string; photos: number
     return jobId;
   }
 
-  // F2: Ya no hay simulación automática. La solicitud permanece en "searching"
-  // hasta que un proveedor real la reclame (F3).
-  // La simulación del proveedor de la demo se mantiene para testing local.
-  if (data.when === "now" && process.env.NODE_ENV === "development") {
-    spawnInbox(jobId); // la solicitud llega al inbox del proveedor de la demo
-    // Simulación DESACTIVADA por defecto en F2.
-    // Para reactivar en desarrollo, descomentar el bloque de simulación.
-  }
+  // F2: Ya no hay simulación automática ni spawnInbox.
+  // La solicitud permanece en "searching" hasta que un proveedor real la reclame (F3).
+  // Los mocks de proveedor están aislados y no se activan desde el flujo real.
 
   return jobId;
 }
