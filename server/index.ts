@@ -21,6 +21,7 @@ import { diagEnabled } from "./lib/diag.js";
 import { healthRoutes } from "./routes/health.js";
 import { categoryRoutes } from "./routes/categories.js";
 import { meRoutes } from "./routes/me.js";
+import { requestRoutes } from "./routes/requests.js";
 
 export const app = new Hono<AuthEnv>();
 
@@ -95,6 +96,7 @@ app.on(["GET", "POST"], "/api/v1/auth/*", async (c) => {
 app.route("/api/v1", healthRoutes);
 app.route("/api/v1", categoryRoutes);
 app.route("/api/v1", meRoutes);
+app.route("/api/v1", requestRoutes);
 
 // ── errores centralizados ──
 app.onError((error, c) => {

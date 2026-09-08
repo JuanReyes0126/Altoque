@@ -6,7 +6,7 @@ import {
   CATS, JOB_IMGS, PROBLEMS, ZONES, advanceJob, catById, clearSession, createJob, fmt, proById, prosByCat, rateJob,
   setRole, toggleFav, useApp, zoneById, type Tab, type View,
 } from "../../lib/state";
-import { authApi } from "../../lib/api";
+import { api, authApi } from "../../lib/api";
 import { PATHS } from "../../lib/router";
 
 /* ════════════════ REQUEST WIZARD ════════════════ */
@@ -37,13 +37,32 @@ export function RequestWizard({ catId: initCat, proId, go }: { catId?: string; p
     step === 3 ? true :
     when === "quote" ? true : (!!selPro || matches.length === 0);
 
-  const submit = () => {
-    const id = createJob({
-      catId, problem: problem.trim(), photos, when, zoneId, note: "",
-      scheduledFor: when === "later" ? `${sched.date} · ${sched.hora}` : undefined,
-      proId: selPro || undefined,
-    });
-    go({ t: "track", jobId: id });
+  const submit = async () => {
+    try {
+      await api.requests.create({
+        categoryId: catId,
+        zoneId,
+        description: problem.trim(),
+        when,
+        scheduledAt:
+          when === "later"
+            ? new Date(`${sched.date}T${sched.hora}:00`).toISOString()
+            : undefined,
+      });
+
+      // Temporal: mantiene funcionando el tracking demo mientras
+      // conectamos las pantallas de lectura al backend real.
+      const id = createJob({
+        catId, problem: problem.trim(), photos, when, zoneId, note: "",
+        scheduledFor: when === "later" ? `${sched.date} · ${sched.hora}` : undefined,
+        proId: selPro || undefined,
+      });
+
+      go({ t: "track", jobId: id });
+    } catch (error) {
+      console.error("No se pudo crear la solicitud real", error);
+      alert("No pudimos crear la solicitud. Inténtalo nuevamente.");
+    }
   };
 
   return (

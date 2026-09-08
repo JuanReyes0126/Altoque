@@ -114,7 +114,26 @@ export const api = {
 
   /* ── solicitudes (cliente) ── F2: POST /requests · GET /requests?scope · POST /requests/:id/{cancel,confirm,review} */
   requests: {
-    create: createJob,   // POST /requests  → { id }
+    create: async (d: {
+      categoryId: string;
+      zoneId: string;
+      description: string;
+      when: "now" | "later" | "quote";
+      scheduledAt?: string;
+    }) => {
+      const res = await http<{
+        data: {
+          request: {
+            id: string;
+            code: string;
+            status: string;
+            created_at: string;
+          };
+        };
+      }>("/api/v1/requests", { body: d });
+
+      return res.data.request;
+    },
     advance: advanceJob, // F2: el servidor empuja estados (SSE) — este helper queda para la demo
     review: rateJob,     // POST /requests/:id/review (UNIQUE(request_id) en BD: 1 review por trabajo)
     byId: (id: string) => getState().jobs.find((j) => j.id === id),
