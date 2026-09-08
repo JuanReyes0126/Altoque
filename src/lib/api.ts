@@ -112,11 +112,63 @@ export const api = {
     favorites: { toggle: toggleFav },   // POST /favorites/:id · DELETE /favorites/:id
   },
 
-  /* ── solicitudes (cliente) ── F2: POST /requests · GET /requests?scope · POST /requests/:id/{cancel,confirm,review} */
+  /* ── solicitudes (cliente) ── F2: POST /requests · GET /requests · GET /requests/:id · POST /requests/:id/{cancel,confirm,review} */
   requests: {
-    create: createJob,   // POST /requests  → { id }
-    advance: advanceJob, // F2: el servidor empuja estados (SSE) — este helper queda para la demo
-    review: rateJob,     // POST /requests/:id/review (UNIQUE(request_id) en BD: 1 review por trabajo)
+    /** POST /api/v1/requests - Crear nueva solicitud */
+    create: async (data: {
+      category_id: string;
+      zone_id: string;
+      description: string;
+      when_type: "now" | "scheduled" | "quote";
+      scheduled_at?: string;
+      address_id?: string;
+      photos?: Array<{ blob_key: string; sort: number }>;
+    }) => {
+      const res = await http<{ data: any }>("/api/v1/requests", { body: data });
+      return res.data;
+    },
+
+    /** GET /api/v1/requests - Listar solicitudes del usuario */
+    list: async (params?: { page?: number; limit?: number }) => {
+      const query = new URLSearchParams();
+      if (params?.page) query.set("page", String(params.page));
+      if (params?.limit) query.set("limit", String(params.limit));
+      const qs = query.toString();
+      const res = await http<{ data: any[]; meta: any }>(`/api/v1/requests${qs ? "?" + qs : ""}`);
+      return res;
+    },
+
+    /** GET /api/v1/requests/:id - Obtener solicitud específica */
+    getById: async (id: string) => {
+      const res = await http<{ data: any }>(`/api/v1/requests/${id}`);
+      return res.data;
+    },
+
+    /** POST /api/v1/requests/:id/cancel - Cancelar solicitud */
+    cancel: async (id: string) => {
+      const res = await http<{ data: any }>(`/api/v1/requests/${id}/cancel`, { body: {} });
+      return res.data;
+    },
+
+    /** POST /api/v1/requests/:id/confirm - Confirmar solicitud completada */
+    confirm: async (id: string) => {
+      const res = await http<{ data: any }>(`/api/v1/requests/${id}/confirm`, { body: {} });
+      return res.data;
+    },
+
+    /** POST /api/v1/requests/:id/review - Dejar review */
+    review: async (id: string, data: {
+      rating: number;
+      punctuality?: number;
+      quality?: number;
+      communication?: number;
+      comment?: string;
+    }) => {
+      const res = await http<{ data: any }>(`/api/v1/requests/${id}/review`, { body: data });
+      return res.data;
+    },
+
+    /** Helper para compatibilidad con UI existente */
     byId: (id: string) => getState().jobs.find((j) => j.id === id),
     all: () => getState().jobs,
   },

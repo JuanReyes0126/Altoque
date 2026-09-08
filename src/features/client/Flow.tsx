@@ -6,7 +6,7 @@ import {
   CATS, JOB_IMGS, PROBLEMS, ZONES, advanceJob, catById, clearSession, createJob, fmt, proById, prosByCat, rateJob,
   setRole, toggleFav, useApp, zoneById, type Tab, type View,
 } from "../../lib/state";
-import { authApi } from "../../lib/api";
+import { api, authApi } from "../../lib/api";
 import { PATHS } from "../../lib/router";
 
 /* ════════════════ REQUEST WIZARD ════════════════ */
@@ -37,13 +37,37 @@ export function RequestWizard({ catId: initCat, proId, go }: { catId?: string; p
     step === 3 ? true :
     when === "quote" ? true : (!!selPro || matches.length === 0);
 
-  const submit = () => {
-    const id = createJob({
-      catId, problem: problem.trim(), photos, when, zoneId, note: "",
-      scheduledFor: when === "later" ? `${sched.date} · ${sched.hora}` : undefined,
-      proId: selPro || undefined,
-    });
-    go({ t: "track", jobId: id });
+  const submit = async () => {
+    try {
+      // F2: Llamar al backend real para crear la solicitud
+      const realRequest = await api.requests.create({
+        category_id: catId,
+        zone_id: zoneId,
+        description: problem.trim(),
+        when_type: when === "later" ? "scheduled" : when,
+        scheduled_at: when === "later" && sched.date && sched.hora
+          ? new Date(`${sched.date}T${sched.hora}`).toISOString()
+          : undefined,
+      });
+
+      // Crear entrada local temporal usando el ID real de PostgreSQL
+      createJob({
+        catId,
+        problem: problem.trim(),
+        photos,
+        when,
+        zoneId,
+        note: "",
+        scheduledFor: when === "later" ? `${sched.date} · ${sched.hora}` : undefined,
+        proId: selPro || undefined,
+        id: realRequest.id, // Usar el ID real del backend
+      });
+
+      go({ t: "track", jobId: realRequest.id });
+    } catch (error) {
+      console.error("Error creating request:", error);
+      // TODO: Mostrar error al usuario
+    }
   };
 
   return (
@@ -307,15 +331,77 @@ function Timeline({ status }: { status: string }) {
 
 export function TrackingView({ jobId, go, jump }: { jobId: string; go: (v: View) => void; jump: (t: Tab) => void }) {
   const s = useApp();
-  const job = s.jobs.find((j) => j.id === jobId);
+  const localJob = s.jobs.find((j) => j.id === jobId);
+  const [backendJob, setBackendJob] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
   const [rating, setRating] = useState(0);
   const [hover, setHover] = useState(0);
   const [text, setText] = useState("");
   const [sent, setSent] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
 
+  // F2: Cargar datos reales del backend
+  useEffect(() => {
+    let cancelled = false;
+    const loadJob = async () => {
+      try {
+        const data = await api.requests.getById(jobId);
+        if (!cancelled) {
+          setBackendJob(data);
+          setLoading(false);
+        }
+      } catch (error) {
+        console.error("Error loading job from backend:", error);
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    loadJob();
+    // Polling cada 5 segundos para actualizar estado
+    const interval = setInterval(loadJob, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [jobId]);
+
+  // Usar datos del backend si están disponibles, sino usar estado local
+  const job = backendJob ? {
+    id: backendJob.id,
+    catId: backendJob.category_id,
+    problem: backendJob.description,
+    photos: [],
+    when: backendJob.when_type === "scheduled" ? "later" : backendJob.when_type,
+    zoneId: backendJob.zone_id,
+    note: "",
+    proId: backendJob.provider_id,
+    status: backendJob.status === "on_the_way" ? "enroute" :
+            backendJob.status === "in_progress" ? "started" :
+            backendJob.status === "completed" ? "done" :
+            backendJob.status,
+    etaMin: backendJob.eta_min,
+    etaLeft: undefined,
+    scheduledFor: backendJob.scheduled_at,
+    rating: backendJob.review?.rating,
+    reviewText: backendJob.review?.comment,
+    createdAt: new Date(backendJob.created_at).getTime(),
+  } : localJob;
+
   useEffect(() => { window.scrollTo({ top: 0 }); }, [job?.status]);
-  if (!job) return null;
+
+  if (loading || !job) {
+    return (
+      <div className="max-w-2xl mx-auto px-5 pb-32">
+        <div className="mt-14 flex flex-col items-center text-center">
+          <div className="w-16 h-16 rounded-full bg-pinesoft grid place-items-center animate-pulse">
+            <Icon name="doc" className="w-8 h-8 text-pine" strokeWidth={1.7} />
+          </div>
+          <p className="font-disp font-bold text-[1.1rem] text-ink mt-5">Cargando solicitud…</p>
+        </div>
+      </div>
+    );
+  }
+
   const pro = job.proId ? proById(job.proId) : null;
   const cat = catById(job.catId);
   const searching = job.status === "searching";
@@ -492,9 +578,60 @@ export function TrackingView({ jobId, go, jump }: { jobId: string; go: (v: View)
 /* ════════════════ SOLICITUDES (tab) ════════════════ */
 export function RequestsTab({ go }: { go: (v: View) => void }) {
   const s = useApp();
-  const loading = useFakeLoad(450);
-  const active = s.jobs.filter((j) => j.status !== "done" || !j.rating);
-  const done = s.jobs.filter((j) => j.status === "done" && j.rating);
+  const [backendJobs, setBackendJobs] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // F2: Cargar solicitudes reales del backend
+  useEffect(() => {
+    let cancelled = false;
+    const loadJobs = async () => {
+      try {
+        const res = await api.requests.list();
+        if (!cancelled) {
+          setBackendJobs(res.data);
+          setLoading(false);
+        }
+      } catch (error) {
+        console.error("Error loading jobs from backend:", error);
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    loadJobs();
+    // Polling cada 10 segundos para actualizar lista
+    const interval = setInterval(loadJobs, 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Combinar datos del backend con estado local (fallback)
+  const allJobs = backendJobs.length > 0
+    ? backendJobs.map((bj) => ({
+        id: bj.id,
+        catId: bj.category_id,
+        problem: bj.description,
+        photos: [],
+        when: bj.when_type === "scheduled" ? "later" : bj.when_type,
+        zoneId: bj.zone_id,
+        note: "",
+        proId: bj.provider_id,
+        status: bj.status === "on_the_way" ? "enroute" :
+                bj.status === "in_progress" ? "started" :
+                bj.status === "completed" ? "done" :
+                bj.status,
+        etaMin: bj.eta_min,
+        etaLeft: undefined,
+        scheduledFor: bj.scheduled_at,
+        rating: bj.review?.rating,
+        reviewText: bj.review?.comment,
+        createdAt: new Date(bj.created_at).getTime(),
+      }))
+    : s.jobs;
+
+  const active = allJobs.filter((j) => j.status !== "done" || !j.rating);
+  const done = allJobs.filter((j) => j.status === "done" && j.rating);
 
   return (
     <div className="max-w-2xl mx-auto px-5 pb-10">
@@ -505,7 +642,7 @@ export function RequestsTab({ go }: { go: (v: View) => void }) {
             <div key={i} className="card p-5"><div className="skel h-4 w-1/2" /><div className="skel h-3 w-2/3 mt-3" /><div className="skel h-9 w-full mt-4" /></div>
           ))}
         </div>
-      ) : s.jobs.length === 0 ? (
+      ) : allJobs.length === 0 ? (
         <div className="text-center py-24">
           <span className="w-16 h-16 rounded-2xl bg-pinesoft text-pine grid place-items-center mx-auto"><Icon name="doc" className="w-8 h-8" strokeWidth={1.7} /></span>
           <p className="font-disp font-bold text-[1.1rem] text-ink mt-5">Aún no tienes solicitudes</p>

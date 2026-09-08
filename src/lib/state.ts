@@ -343,41 +343,26 @@ const later = (jobId: string, ms: number, fn: () => void) => {
 const patchJob = (id: string, p: Partial<Job>) =>
   set({ jobs: state.jobs.map((j) => (j.id === id ? { ...j, ...p } : j)) });
 
-export function createJob(data: { catId: string; problem: string; photos: number[]; when: When; zoneId: string; note: string; scheduledFor?: string; proId?: string }): string {
-  const id = "j" + Date.now();
-  const job: Job = { id, ...data, status: data.when === "quote" ? "quoted" : "searching", createdAt: Date.now() };
+export function createJob(data: { catId: string; problem: string; photos: number[]; when: When; zoneId: string; note: string; scheduledFor?: string; proId?: string; id?: string }): string {
+  const jobId = data.id ?? "j" + Date.now();
+  const job: Job = { id: jobId, ...data, status: data.when === "quote" ? "quoted" : "searching", createdAt: Date.now() };
   set({ jobs: [job, ...state.jobs] });
 
   if (data.when === "quote") {
     toast("Solicitud de cotización enviada a 5 profesionales");
-    return id;
+    return jobId;
   }
-  if (data.when === "now") {
-    spawnInbox(id); // la solicitud también llega al inbox del proveedor de la demo
-    // cadena simulada: aceptación → en camino → llegada → inicio → fin
-    const best = data.proId
-      ? proById(data.proId)
-      : prosByCat(data.catId).filter((p) => p.available).sort((a, b) => b.rating - a.rating)[0]
-        ?? prosByCat(data.catId).sort((a, b) => b.rating - a.rating)[0]
-        ?? PROS[0];
-    later(id, 6500, () => {
-      patchJob(id, { status: "accepted", proId: best.id, etaMin: best.eta, etaLeft: best.eta * 60 });
-      toast(`${best.name.split(" ")[0]} aceptó tu solicitud`);
-      later(id, 3500, () => {
-        patchJob(id, { status: "enroute" });
-        later(id, best.eta * 60 * 100, () => { // ×100 acelerado para demo
-          patchJob(id, { status: "arrived", etaLeft: 0 });
-          toast(`${best.name.split(" ")[0]} llegó a tu ubicación`);
-          later(id, 9000, () => {
-            patchJob(id, { status: "started" });
-            toast("Servicio iniciado");
-            later(id, 12000, () => { patchJob(id, { status: "done" }); toast("Servicio completado · ¡deja tu calificación!"); });
-          });
-        });
-      });
-    });
+
+  // F2: Ya no hay simulación automática. La solicitud permanece en "searching"
+  // hasta que un proveedor real la reclame (F3).
+  // La simulación del proveedor de la demo se mantiene para testing local.
+  if (data.when === "now" && process.env.NODE_ENV === "development") {
+    spawnInbox(jobId); // la solicitud llega al inbox del proveedor de la demo
+    // Simulación DESACTIVADA por defecto en F2.
+    // Para reactivar en desarrollo, descomentar el bloque de simulación.
   }
-  return id;
+
+  return jobId;
 }
 
 export function advanceJob(id: string) {
