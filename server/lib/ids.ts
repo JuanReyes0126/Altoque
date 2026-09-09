@@ -21,17 +21,24 @@ export function ulid(): string {
     time = CROCKFORD[ts % 32] + time;
     ts = Math.floor(ts / 32);
   }
-  const rnd = randomBytes(10);
+  const rnd = randomBytes(10); // 80 bits
   let rand = "";
   // 80 bits = 16 caracteres base32
   for (let i = 0; i < 16; i++) {
-    const byteIndex = Math.floor((i * 5) / 8);
-    const bitOffset = (i * 5) % 8;
-    let value = rnd[byteIndex] >> bitOffset;
-    if (bitOffset > 3 && byteIndex + 1 < rnd.length) {
-      value |= rnd[byteIndex + 1] << (8 - bitOffset);
+    const bitPos = i * 5;
+    const byteIndex = Math.floor(bitPos / 8);
+    const bitOffset = bitPos % 8;
+    
+    let value;
+    if (bitOffset <= 3) {
+      // Los 5 bits caben en un byte
+      value = (rnd[byteIndex] >> (3 - bitOffset)) & 31;
+    } else {
+      // Los 5 bits cruzan dos bytes
+      value = ((rnd[byteIndex] << (bitOffset - 3)) | (rnd[byteIndex + 1] >> (11 - bitOffset))) & 31;
     }
-    rand += CROCKFORD[value & 31];
+    
+    rand += CROCKFORD[value];
   }
   return time + rand;
 }
