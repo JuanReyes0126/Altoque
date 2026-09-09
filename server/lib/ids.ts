@@ -23,7 +23,16 @@ export function ulid(): string {
   }
   const rnd = randomBytes(10);
   let rand = "";
-  for (const b of rnd) rand += CROCKFORD[b % 32];
+  // 80 bits = 16 caracteres base32
+  for (let i = 0; i < 16; i++) {
+    const byteIndex = Math.floor((i * 5) / 8);
+    const bitOffset = (i * 5) % 8;
+    let value = rnd[byteIndex] >> bitOffset;
+    if (bitOffset > 3 && byteIndex + 1 < rnd.length) {
+      value |= rnd[byteIndex + 1] << (8 - bitOffset);
+    }
+    rand += CROCKFORD[value & 31];
+  }
   return time + rand;
 }
 
