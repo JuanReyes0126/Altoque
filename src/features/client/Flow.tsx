@@ -851,7 +851,6 @@ export function FavoritesTab({ go }: { go: (v: View) => void }) {
 export function MeTab({ go, jump }: { go: (v: View) => void; jump: (t: Tab) => void }) {
   const s = useApp();
   const nav = useNavigate();
-  const doneCount = s.jobs.filter((j) => j.status === "done").length;
   const myName = s.session?.name ?? "María Peralta";
   return (
     <div className="max-w-2xl mx-auto px-5 pb-10">
@@ -861,7 +860,7 @@ export function MeTab({ go, jump }: { go: (v: View) => void; jump: (t: Tab) => v
         <div>
           <p className="font-disp font-bold text-[1.15rem] text-ink">{myName}</p>
           <p className="text-[0.78rem] text-mut font-semibold mt-0.5">{zoneById(s.zoneId).name} · Santiago</p>
-          <p className="text-[0.7rem] text-soft font-bold mt-1">{doneCount} servicios · miembro nuevo</p>
+          <p className="text-[0.7rem] text-soft font-bold mt-1">Miembro nuevo</p>
         </div>
       </section>
 
