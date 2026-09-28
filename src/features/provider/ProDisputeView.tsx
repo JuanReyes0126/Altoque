@@ -7,7 +7,7 @@ interface Dispute {
   request_id: string;
   opened_by: string;
   reason: string;
-  status: "open" | "resolved_customer" | "resolved_provider" | "dismissed";
+  status: "open" | "resolved_customer" | "resolved_provider";
   resolved_by?: string;
   resolution?: string;
   created_at: string;
@@ -74,7 +74,6 @@ export function ProDisputeView({ requestId, onDisputeExists }: ProDisputeViewPro
     open: { label: "Abierta", color: "bg-sunsoft text-sun2", icon: "alert" },
     resolved_customer: { label: "Resuelta a favor del cliente", color: "bg-oksoft text-ok", icon: "check" },
     resolved_provider: { label: "Resuelta a tu favor", color: "bg-pinesoft text-pine", icon: "check" },
-    dismissed: { label: "Descartada", color: "bg-tint text-mut", icon: "x" },
   };
 
   const config = statusConfig[dispute.status];
