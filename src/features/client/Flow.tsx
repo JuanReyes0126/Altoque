@@ -3,11 +3,21 @@ import { useNavigate } from "react-router-dom";
 import { Icon } from "../../components/icons";
 import { AvailDot, Face, FadeUp, JobPhoto, MapCard, ProListItem, Radar, RowHead, Stars, Verif, useFakeLoad } from "../../components/ui/kit";
 import {
-  CATS, JOB_IMGS, PROBLEMS, ZONES, advanceJob, catById, clearSession, createJob, fmt, proById, prosByCat, rateJob,
+  CATS, JOB_IMGS, PROBLEMS, ZONES, catById, clearSession, createJob, fmt, proById, prosByCat,
   setRole, toggleFav, useApp, zoneById, type Tab, type View,
 } from "../../lib/state";
 import { api, authApi } from "../../lib/api";
 import { PATHS } from "../../lib/router";
+
+// Mapeo centralizado de estados del backend al frontend
+function mapBackendStatus(backendStatus: string): string {
+  const mapping: Record<string, string> = {
+    on_the_way: "enroute",
+    in_progress: "started",
+    completed: "done",
+  };
+  return mapping[backendStatus] || backendStatus;
+}
 
 /* ════════════════ REQUEST WIZARD ════════════════ */
 export function RequestWizard({ catId: initCat, proId, go }: { catId?: string; proId?: string; go: (v: View) => void }) {
@@ -15,7 +25,8 @@ export function RequestWizard({ catId: initCat, proId, go }: { catId?: string; p
   const prePro = proId ? proById(proId) : null;
   const [catId, setCatId] = useState(initCat ?? prePro?.cats[0] ?? "");
   const [problem, setProblem] = useState("");
-  const [photos, setPhotos] = useState<number[]>([]);
+  const [photos, setPhotos] = useState<Array<{ id: string; blob_key: string; preview: string }>>([]);
+  const [uploading, setUploading] = useState(false);
   const [when, setWhen] = useState<"now" | "later" | "quote">("now");
   const [zoneId, setZoneId] = useState(s.zoneId);
   const [sched, setSched] = useState({ date: "", hora: "" });
@@ -48,13 +59,14 @@ export function RequestWizard({ catId: initCat, proId, go }: { catId?: string; p
         scheduled_at: when === "later" && sched.date && sched.hora
           ? new Date(`${sched.date}T${sched.hora}`).toISOString()
           : undefined,
+        photos: photos.map((p, i) => ({ blob_key: p.blob_key, sort: i })),
       });
 
       // Crear entrada local temporal usando el ID real de PostgreSQL
       createJob({
         catId,
         problem: problem.trim(),
-        photos,
+        photos: photos.map((p, i) => i), // Convertir a formato legacy para estado local
         when,
         zoneId,
         note: "",
@@ -137,24 +149,44 @@ export function RequestWizard({ catId: initCat, proId, go }: { catId?: string; p
             aria-label="Descripción del problema"
           />
 
-          <p className="text-[0.78rem] font-bold text-ink mt-5 mb-2.5">Fotografías <span className="text-soft font-semibold">(opcional)</span></p>
+          <p className="text-[0.78rem] font-bold text-ink mt-5 mb-2.5">Fotografías <span className="text-soft font-semibold">(opcional, máx 3)</span></p>
           <div className="flex gap-3 overflow-x-auto no-scrollbar">
-            {photos.map((pi) => (
-              <div key={pi} className="relative shrink-0 w-20 h-20 rounded-2xl overflow-hidden">
-                <JobPhoto i={pi} />
-                <button onClick={() => setPhotos(photos.filter((x) => x !== pi))} className="absolute top-1 right-1 w-6 h-6 grid place-items-center rounded-full bg-ink/70 text-white" aria-label="Quitar foto">
+            {photos.map((photo) => (
+              <div key={photo.id} className="relative shrink-0 w-20 h-20 rounded-2xl overflow-hidden">
+                <img src={photo.preview} alt="Foto" className="w-full h-full object-cover" />
+                <button onClick={() => setPhotos(photos.filter((x) => x.id !== photo.id))} className="absolute top-1 right-1 w-6 h-6 grid place-items-center rounded-full bg-ink/70 text-white" aria-label="Quitar foto">
                   <Icon name="x" className="w-3 h-3" strokeWidth={2.6} />
                 </button>
               </div>
             ))}
-            {photos.length < 3 && (
-              <button
-                onClick={() => setPhotos([...photos, (photos.length + (cat ? CATS.indexOf(cat) : 0)) % JOB_IMGS.length])}
-                className="shrink-0 w-20 h-20 rounded-2xl border-2 border-dashed border-line grid place-items-center text-soft hover:border-pine hover:text-pine transition-colors"
-                aria-label="Añadir foto"
-              >
-                <Icon name="camera" className="w-6 h-6" strokeWidth={1.8} />
-              </button>
+            {photos.length < 3 && !uploading && (
+              <label className="shrink-0 w-20 h-20 rounded-2xl border-2 border-dashed border-line grid place-items-center text-soft hover:border-pine hover:text-pine transition-colors cursor-pointer">
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    setUploading(true);
+                    try {
+                      const result = await api.uploads.requestPhoto(file);
+                      const preview = URL.createObjectURL(file);
+                      setPhotos([...photos, { id: result.id, blob_key: result.blob_key, preview }]);
+                    } catch (error) {
+                      console.error("Error uploading photo:", error);
+                      // TODO: Mostrar error al usuario
+                    } finally {
+                      setUploading(false);
+                    }
+                  }}
+                />
+                {uploading ? (
+                  <div className="w-6 h-6 border-2 border-pine border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Icon name="camera" className="w-6 h-6" strokeWidth={1.8} />
+                )}
+              </label>
             )}
           </div>
         </section>
@@ -227,7 +259,7 @@ export function RequestWizard({ catId: initCat, proId, go }: { catId?: string; p
                 <SummaryRow l="Servicio" v={cat?.name ?? ""} />
                 <SummaryRow l="Problema" v={problem} />
                 <SummaryRow l="Ubicación" v={zoneById(zoneId).name} />
-                <SummaryRow l="Fotos" v={photos.length ? `${photos.length} adjuntas` : "Sin fotos"} />
+                <SummaryRow l="Fotos" v={photos.length ? `${photos.length} adjunta${photos.length > 1 ? "s" : ""}` : "Sin fotos"} />
               </div>
             </>
           ) : (
@@ -375,10 +407,7 @@ export function TrackingView({ jobId, go, jump }: { jobId: string; go: (v: View)
     zoneId: backendJob.zone_id,
     note: "",
     proId: backendJob.provider_id,
-    status: backendJob.status === "on_the_way" ? "enroute" :
-            backendJob.status === "in_progress" ? "started" :
-            backendJob.status === "completed" ? "done" :
-            backendJob.status,
+    status: mapBackendStatus(backendJob.status),
     etaMin: backendJob.eta_min,
     etaLeft: undefined,
     scheduledFor: backendJob.scheduled_at,
@@ -629,10 +658,7 @@ export function RequestsTab({ go }: { go: (v: View) => void }) {
         zoneId: bj.zone_id,
         note: "",
         proId: bj.provider_id,
-        status: bj.status === "on_the_way" ? "enroute" :
-                bj.status === "in_progress" ? "started" :
-                bj.status === "completed" ? "done" :
-                bj.status,
+        status: mapBackendStatus(bj.status),
         etaMin: bj.eta_min,
         etaLeft: undefined,
         scheduledFor: bj.scheduled_at,
@@ -668,7 +694,7 @@ export function RequestsTab({ go }: { go: (v: View) => void }) {
               <p className="text-[0.68rem] font-extrabold tracking-[0.18em] text-soft uppercase mb-3">En curso</p>
               <div className="space-y-3.5">
                 {active.map((j) => (
-                  <JobCard key={j.id} jobId={j.id} go={go} />
+                  <JobCard key={j.id} job={j} go={go} />
                 ))}
               </div>
             </section>
@@ -678,7 +704,7 @@ export function RequestsTab({ go }: { go: (v: View) => void }) {
               <p className="text-[0.68rem] font-extrabold tracking-[0.18em] text-soft uppercase mb-3">Completadas</p>
               <div className="space-y-3.5">
                 {done.map((j) => (
-                  <JobCard key={j.id} jobId={j.id} go={go} />
+                  <JobCard key={j.id} job={j} go={go} />
                 ))}
               </div>
             </section>
@@ -689,9 +715,8 @@ export function RequestsTab({ go }: { go: (v: View) => void }) {
   );
 }
 
-function JobCard({ jobId, go }: { jobId: string; go: (v: View) => void }) {
-  const s = useApp();
-  const j = s.jobs.find((x) => x.id === jobId)!;
+function JobCard({ job, go }: { job: any; go: (v: View) => void }) {
+  const j = job;
   const cat = catById(j.catId);
   const pro = j.proId ? proById(j.proId) : null;
   const label = j.status === "searching" ? "Buscando pro…" : j.status === "accepted" ? "Aceptada" : j.status === "enroute" ? "En camino" : j.status === "arrived" ? "Llegó" : j.status === "started" ? "En curso" : j.status === "quoted" ? "Cotizando" : "Completada";

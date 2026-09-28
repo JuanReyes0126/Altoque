@@ -144,6 +144,7 @@ model user {
   admin_audit_log      admin_audit_log[]
   reviewed_documents   provider_document[]   @relation("doc_reviewer")
   provider_verifications provider_verification_history[] @relation("verification_actor")
+  file                 file[]
 }
 
 model session {
@@ -532,6 +533,26 @@ model rate_limit {
   window_start DateTime @db.Timestamptz()
 
   @@id([bucket, subject])
+}
+
+/// Archivos subidos (fotos de solicitudes, documentos de proveedores, etc.)
+/// Almacenamiento en Vercel Blob. blob_key es la clave en el storage.
+model file {
+  id          String   @id // ULID
+  owner_id    String
+  owner       user     @relation(fields: [owner_id], references: [id], onDelete: Cascade)
+  visibility  String   // public | private
+  blob_key    String   // clave en Vercel Blob
+  mime        String
+  size_bytes  Int
+  purpose     String   // request_photo | provider_document | avatar | ...
+  request_id  String?
+  provider_id String?
+  created_at  DateTime @default(now())
+
+  @@index([owner_id])
+  @@index([request_id])
+  @@index([provider_id])
 }
 
 // ─────────────────────────── FINANCIERO (F5) ───────────────────────────

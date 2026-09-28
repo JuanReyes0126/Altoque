@@ -68,6 +68,44 @@ export function fileStore(): FileStore {
   if (!process.env.BLOB_READ_WRITE_TOKEN || !process.env.BLOB_PRIVATE_READ_WRITE_TOKEN) {
     throw new AppError("INTERNAL_ERROR", "Almacenamiento no configurado (faltan tokens BLOB_*)", 503);
   }
-  // Implementación @vercel/blob en F2/F3 (misma interfaz).
-  throw new AppError("INTERNAL_ERROR", "FileStore se habilita en F2", 503);
+
+  // Importar dinámicamente para evitar errores en entornos sin @vercel/blob
+  let blobModule: any;
+  const getBlob = async () => {
+    if (!blobModule) {
+      blobModule = await import("@vercel/blob");
+    }
+    return blobModule;
+  };
+
+  return {
+    async putPrivate(key: string, bytes: Uint8Array, contentType: string): Promise<void> {
+      const blob = await getBlob();
+      await blob.put(key, bytes, {
+        access: "private",
+        token: process.env.BLOB_PRIVATE_READ_WRITE_TOKEN!,
+        contentType,
+      });
+    },
+
+    async putPublic(key: string, bytes: Uint8Array, contentType: string): Promise<{ url: string }> {
+      const blob = await getBlob();
+      const result = await blob.put(key, bytes, {
+        access: "public",
+        token: process.env.BLOB_READ_WRITE_TOKEN!,
+        contentType,
+      });
+      return { url: result.url };
+    },
+
+    async getPrivateSignedUrl(key: string, ttlSeconds: number): Promise<string> {
+      const blob = await getBlob();
+      const result = await blob.getSignedUrl(key, {
+        token: process.env.BLOB_PRIVATE_READ_WRITE_TOKEN!,
+        access: "private",
+        validUntil: new Date(Date.now() + ttlSeconds * 1000),
+      });
+      return result.signedUrl;
+    },
+  };
 }

@@ -173,6 +173,20 @@ export const api = {
     all: () => getState().jobs,
   },
 
+  /* ── uploads ── F2: POST /uploads/request-photo */
+  uploads: {
+    /** POST /api/v1/uploads/request-photo - Subir foto para solicitud */
+    requestPhoto: async (file: File) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await http<{ data: { id: string; blob_key: string } }>("/api/v1/uploads/request-photo", {
+        method: "POST",
+        body: formData,
+      });
+      return res.data;
+    },
+  },
+
   /* ── proveedor ── F3: GET /provider/inbox · POST /requests/:id/claim (atómico en BD) */
   provider: {
     inbox: () => getState().inbox,

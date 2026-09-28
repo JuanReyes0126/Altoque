@@ -22,6 +22,7 @@ import { healthRoutes } from "./routes/health.js";
 import { categoryRoutes } from "./routes/categories.js";
 import { meRoutes } from "./routes/me.js";
 import { requestRoutes } from "./routes/requests.js";
+import { uploadRoutes } from "./routes/uploads.js";
 
 export const app = new Hono<AuthEnv>();
 
@@ -99,6 +100,7 @@ app.route("/api/v1", meRoutes);
 
 // ── dominio F2 ──
 app.route("/api/v1/requests", requestRoutes);
+app.route("/api/v1/uploads", uploadRoutes);
 
 // ── errores centralizados ──
 app.onError((error, c) => {
