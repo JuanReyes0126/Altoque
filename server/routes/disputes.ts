@@ -18,9 +18,9 @@ import { audit } from "../lib/audit.js";
 
 export const disputeRoutes = new Hono<AuthEnv>();
 
-// ── GET /api/v1/disputes/admin/all ──
-// Listar todas las disputas (admin) - DEBE IR ANTES DE /:id para evitar colisión
-disputeRoutes.get("/admin/all", requireAuth, requireVerifiedEmail, requirePermission("disputes.resolve"), async (c) => {
+// ── GET /api/v1/disputes/list/all ──
+// Listar todas las disputas (admin) - Ruta específica para evitar colisión con /:id
+disputeRoutes.get("/list/all", requireAuth, requireVerifiedEmail, requirePermission("disputes.resolve"), async (c) => {
   const { page: pageNum, limit, skip } = parsePaging(c.req.query());
   const status = c.req.query("status");
 
