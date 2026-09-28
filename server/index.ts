@@ -23,6 +23,8 @@ import { categoryRoutes } from "./routes/categories.js";
 import { meRoutes } from "./routes/me.js";
 import { requestRoutes } from "./routes/requests.js";
 import { uploadRoutes } from "./routes/uploads.js";
+import { providerRoutes } from "./routes/providers.js";
+import { adminRoutes } from "./routes/admin.js";
 
 export const app = new Hono<AuthEnv>();
 
@@ -101,6 +103,12 @@ app.route("/api/v1", meRoutes);
 // ── dominio F2 ──
 app.route("/api/v1/requests", requestRoutes);
 app.route("/api/v1/uploads", uploadRoutes);
+
+// ── dominio F3 ──
+app.route("/api/v1/provider", providerRoutes);
+
+// ── dominio F6 ──
+app.route("/api/v1/admin", adminRoutes);
 
 // ── errores centralizados ──
 app.onError((error, c) => {

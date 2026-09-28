@@ -88,16 +88,19 @@ export const api = {
 
   /* ── catálogo ── F2: GET /categories · GET /zones (cacheables, raramente cambian) */
   categories: {
-    list: (): Cat[] => CATS,
-    get: catById,
+    list: async (): Promise<Cat[]> => {
+      const res = await http<{ data: { categories: Cat[] } }>("/api/v1/categories");
+      return res.data.categories;
+    },
+    get: catById, // fallback local
   },
   zones: {
-    list: (): Zone[] => ZONES,
+    list: (): Zone[] => ZONES, // por ahora mock, no hay endpoint
     get: zoneById,
   },
 
-  /* ── proveedores ── F2: GET /pros?cat&zone&available&verified&sort&page&limit */
-  providers: {
+  /* ── catálogo de proveedores ── F2: GET /pros?cat&zone&available&verified&sort&page&limit */
+  prospects: {
     list: (f: ProviderFilters = {}): Pro[] => {
       let list = f.catId ? prosByCat(f.catId) : PROS;
       if (f.available) list = list.filter((p) => p.available);
@@ -187,13 +190,75 @@ export const api = {
     },
   },
 
-  /* ── proveedor ── F3: GET /provider/inbox · POST /requests/:id/claim (atómico en BD) */
-  provider: {
-    inbox: () => getState().inbox,
-    claim: acceptIncoming,      // UPDATE ... WHERE status='searching' AND provider_id IS NULL
-    advance: advanceProJob,     // POST /requests/:id/status (solo transición válida)
-    availability: setProAvailable, // PATCH /provider/availability
-    stats: () => getState().proStats,
+  /* ── proveedor ── F3: endpoints reales */
+  providers: {
+    /** GET /api/v1/provider/me - Obtener perfil del proveedor */
+    getMe: async () => {
+      const res = await http<{ data: any }>("/api/v1/provider/me");
+      return res.data;
+    },
+
+    /** POST /api/v1/provider/me - Crear perfil de proveedor */
+    create: async (data: {
+      business_name?: string;
+      bio?: string;
+      years_exp?: number;
+      category_ids: string[];
+      zone_ids: string[];
+    }) => {
+      const res = await http<{ data: any }>("/api/v1/provider/me", { body: data });
+      return res.data;
+    },
+
+    /** PATCH /api/v1/provider/availability - Cambiar disponibilidad */
+    setAvailability: async (is_available: boolean) => {
+      const res = await http<{ data: any }>("/api/v1/provider/availability", {
+        body: { is_available },
+      });
+      return res.data;
+    },
+
+    /** GET /api/v1/provider/inbox - Solicitudes compatibles */
+    getInbox: async (params?: { page?: number; limit?: number }) => {
+      const query = new URLSearchParams();
+      if (params?.page) query.set("page", String(params.page));
+      if (params?.limit) query.set("limit", String(params.limit));
+      const qs = query.toString();
+      const res = await http<{ data: any[]; meta: any }>(`/api/v1/provider/inbox${qs ? "?" + qs : ""}`);
+      return res;
+    },
+
+    /** POST /api/v1/requests/:id/claim - Reclamar solicitud */
+    claim: async (requestId: string, eta_min: number) => {
+      const res = await http<{ data: any }>(`/api/v1/requests/${requestId}/claim`, {
+        body: { eta_min },
+      });
+      return res.data;
+    },
+
+    /** POST /api/v1/requests/:id/status - Actualizar estado del trabajo */
+    updateStatus: async (requestId: string, status: string, note?: string) => {
+      const res = await http<{ data: any }>(`/api/v1/requests/${requestId}/status`, {
+        body: { status, note },
+      });
+      return res.data;
+    },
+
+    /** GET /api/v1/provider/earnings - Estadísticas de ingresos */
+    getEarnings: async (range: "day" | "week" | "month" = "week") => {
+      const res = await http<{ data: any }>(`/api/v1/provider/earnings?range=${range}`);
+      return res.data;
+    },
+
+    /** GET /api/v1/provider/active-job - Trabajo activo actual */
+    getActiveJob: async () => {
+      try {
+        const res = await http<{ data: any }>("/api/v1/provider/active-job");
+        return res;
+      } catch {
+        return { data: null };
+      }
+    },
   },
 
   /* ── admin ── F4: todo desde PostgreSQL real + audit log obligatorio por mutación */

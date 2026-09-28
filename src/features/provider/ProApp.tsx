@@ -3,10 +3,10 @@ import { useNavigate } from "react-router-dom";
 import { Icon } from "../../components/icons";
 import { Face, FadeUp, JobPhoto, MapCard, Stars, Toggle, useCountdown } from "../../components/ui/kit";
 import {
-  acceptIncoming, advanceProJob, catById, clearSession, dismissIncoming, fmt, getState, proById, setProAvailable,
-  setRole, spawnInbox, tickInbox, useApp, zoneById, CARLOS_ID,
+  catById, clearSession, fmt,
+  setRole, useApp, zoneById,
 } from "../../lib/state";
-import { authApi } from "../../lib/api";
+import { api, authApi } from "../../lib/api";
 import { PATHS } from "../../lib/router";
 
 type ProTab = "home" | "activity" | "me";
@@ -14,24 +14,124 @@ const ETAS = [10, 15, 20, 30, 45, 60];
 
 export function ProApp() {
   const s = useApp();
+  const nav = useNavigate();
   const [tab, setTab] = useState<ProTab>("home");
-  const [etaFor, setEtaFor] = useState<string | null>(null); // incoming id awaiting ETA
-  const me = proById(CARLOS_ID);
+  const [providerProfile, setProviderProfile] = useState<any>(null);
+  const [inbox, setInbox] = useState<any[]>([]);
+  const [activeJob, setActiveJob] = useState<any>(null);
+  const [etaFor, setEtaFor] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
+  // F3: Cargar perfil del proveedor desde el backend
   useEffect(() => {
-    const boot = setTimeout(() => {
-      const st = getState();
-      if (st.proAvailable && st.inbox.length === 0) spawnInbox();
-    }, 1500);
-    const t = setInterval(tickInbox, 1000);
-    const sp = setInterval(() => {
-      const st = getState();
-      if (st.role === "provider" && st.proAvailable && !st.proActive && st.inbox.filter((i) => !i.jobId).length < 2) spawnInbox();
-    }, 11000);
-    return () => { clearTimeout(boot); clearInterval(t); clearInterval(sp); };
+    api.providers.getMe()
+      .then((profile) => {
+        setProviderProfile(profile);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
   }, []);
 
-  const active = s.proActive;
+  // F3: Cargar inbox de solicitudes
+  useEffect(() => {
+    const loadInbox = async () => {
+      try {
+        const res = await api.providers.getInbox();
+        setInbox(res.data);
+      } catch (error) {
+        console.error("Error loading inbox:", error);
+      }
+    };
+
+    loadInbox();
+    const interval = setInterval(loadInbox, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // F3: Cargar trabajo activo si existe
+  useEffect(() => {
+    const loadActiveJob = async () => {
+      try {
+        const res = await api.providers.getActiveJob();
+        if (res.data) setActiveJob(res.data);
+      } catch (error) {
+        // No hay trabajo activo
+      }
+    };
+
+    loadActiveJob();
+    const interval = setInterval(loadActiveJob, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleToggleAvailability = async () => {
+    if (!providerProfile) return;
+    try {
+      const newAvailability = !providerProfile.is_available;
+      await api.providers.setAvailability(newAvailability);
+      setProviderProfile({ ...providerProfile, is_available: newAvailability });
+    } catch (error) {
+      console.error("Error toggling availability:", error);
+    }
+  };
+
+  const handleAcceptJob = async (requestId: string, eta: number) => {
+    try {
+      await api.providers.claim(requestId, eta);
+      setEtaFor(null);
+      // Recargar inbox y trabajo activo
+      const [inboxRes, activeRes] = await Promise.all([
+        api.providers.getInbox(),
+        api.providers.getActiveJob(),
+      ]);
+      setInbox(inboxRes.data);
+      if (activeRes.data) setActiveJob(activeRes.data);
+    } catch (error) {
+      console.error("Error accepting job:", error);
+    }
+  };
+
+  const handleRejectJob = async (requestId: string) => {
+    setInbox(inbox.filter((inc) => inc.id !== requestId));
+  };
+
+  const handleAdvanceJob = async () => {
+    if (!activeJob) return;
+    const statusMap: Record<string, string> = {
+      accepted: "on_the_way",
+      on_the_way: "arrived",
+      arrived: "in_progress",
+      in_progress: "completed",
+    };
+    const nextStatus = statusMap[activeJob.status];
+
+    if (!nextStatus) return;
+
+    try {
+      await api.providers.updateStatus(activeJob.id, nextStatus);
+      const res = await api.providers.getActiveJob();
+      if (res.data) {
+        setActiveJob(res.data);
+      } else {
+        setActiveJob(null);
+      }
+    } catch (error) {
+      console.error("Error advancing job:", error);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-dvh bg-night text-ntxt grid place-items-center">
+        <div className="text-center">
+          <div className="w-16 h-16 rounded-full bg-nsurf grid place-items-center mx-auto animate-pulse">
+            <Icon name="wrench" className="w-8 h-8 text-nmut" strokeWidth={1.7} />
+          </div>
+          <p className="font-disp font-bold text-[1.1rem] text-ntxt mt-5">Cargando panel...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-dvh bg-night text-ntxt pb-28">
@@ -40,50 +140,52 @@ export function ProApp() {
         <header className="pt-6 flex items-center gap-3">
           <div className="min-w-0 flex-1">
             <p className="text-[0.62rem] font-extrabold uppercase tracking-[0.18em] text-nmut">Altoque Pro</p>
-            <h1 className="font-disp font-bold text-[1.35rem] leading-tight truncate">{s.session?.name ?? me.name}</h1>
+            <h1 className="font-disp font-bold text-[1.35rem] leading-tight truncate">{s.session?.name || "Proveedor"}</h1>
           </div>
           <div className="flex items-center gap-2">
-            <span className={`text-[0.68rem] font-extrabold rounded-full px-3 py-1.5 ${s.proAvailable ? "bg-[#173526] text-[#4ade80]" : "bg-nsurf text-nmut"}`}>
-              {s.proAvailable ? "En línea" : "Fuera de línea"}
+            <span className={`text-[0.68rem] font-extrabold rounded-full px-3 py-1.5 ${providerProfile?.is_available ? "bg-[#173526] text-[#4ade80]" : "bg-nsurf text-nmut"}`}>
+              {providerProfile?.is_available ? "En línea" : "Fuera de línea"}
             </span>
-            <Face face={me.face} name={me.name} size="w-10 h-10" />
+            {providerProfile?.user && (
+              <Face face={{ f: 1, q: 0 }} name={providerProfile.user.name} size="w-10 h-10" />
+            )}
           </div>
         </header>
 
         {/* availability switch */}
         <FadeUp>
-          <section className={`ncard mt-5 p-5 flex items-center gap-4 transition-colors ${s.proAvailable ? "border-[#2e5c43]" : ""}`}>
+          <section className={`ncard mt-5 p-5 flex items-center gap-4 transition-colors ${providerProfile?.is_available ? "border-[#2e5c43]" : ""}`}>
             <div className="flex-1">
               <h2 className="font-disp font-bold text-[1.2rem] leading-tight">¿Estás disponible?</h2>
-              <p className={`text-[0.78rem] font-semibold mt-1 ${s.proAvailable ? "text-[#4ade80]" : "text-nmut"}`}>
-                {s.proAvailable ? "Recibiendo solicitudes cerca de ti" : "No recibirás nuevas solicitudes"}
+              <p className={`text-[0.78rem] font-semibold mt-1 ${providerProfile?.is_available ? "text-[#4ade80]" : "text-nmut"}`}>
+                {providerProfile?.is_available ? "Recibiendo solicitudes cerca de ti" : "No recibirás nuevas solicitudes"}
               </p>
             </div>
-            <Toggle on={s.proAvailable} onChange={setProAvailable} label="Disponibilidad" />
+            <Toggle on={providerProfile?.is_available || false} onChange={handleToggleAvailability} label="Disponibilidad" />
           </section>
         </FadeUp>
 
         {tab === "home" && (
           <>
             {/* active job */}
-            {active ? (
-              <ActiveJob key={active.id} />
+            {activeJob ? (
+              <ActiveJob job={activeJob} onAdvance={handleAdvanceJob} />
             ) : (
               <>
                 {/* incoming requests */}
                 <section className="mt-7">
                   <div className="flex items-center justify-between mb-3.5">
                     <h3 className="font-disp font-bold text-[1.05rem]">Solicitudes cerca de ti</h3>
-                    <span className="text-[0.7rem] font-extrabold text-namber bg-[#332a14] rounded-full px-2.5 py-1">{s.inbox.length} nuevas</span>
+                    <span className="text-[0.7rem] font-extrabold text-namber bg-[#332a14] rounded-full px-2.5 py-1">{inbox.length} nuevas</span>
                   </div>
 
-                  {!s.proAvailable ? (
+                  {!providerProfile?.is_available ? (
                     <div className="ncard p-8 text-center">
                       <span className="w-14 h-14 rounded-2xl bg-nsurf text-nmut grid place-items-center mx-auto"><Icon name="bell" className="w-7 h-7" strokeWidth={1.7} /></span>
                       <p className="font-disp font-bold text-[1rem] mt-4">Estás fuera de línea</p>
                       <p className="text-[0.8rem] text-nmut font-medium mt-1">Activa tu disponibilidad para recibir trabajos.</p>
                     </div>
-                  ) : s.inbox.length === 0 ? (
+                  ) : inbox.length === 0 ? (
                     <div className="ncard p-8 text-center">
                       <span className="w-14 h-14 rounded-2xl bg-nsurf text-namber grid place-items-center mx-auto animate-ride"><Icon name="radar" className="w-7 h-7" strokeWidth={1.7} /></span>
                       <p className="font-disp font-bold text-[1rem] mt-4">Buscando solicitudes…</p>
@@ -91,8 +193,14 @@ export function ProApp() {
                     </div>
                   ) : (
                     <div className="space-y-4">
-                      {s.inbox.map((inc, i) => (
-                        <IncomingCard key={inc.id} id={inc.id} delay={i * 80} onEta={() => setEtaFor(inc.id)} />
+                      {inbox.map((inc, i) => (
+                        <IncomingCard
+                          key={inc.id}
+                          inc={inc}
+                          delay={i * 80}
+                          onAccept={() => setEtaFor(inc.id)}
+                          onReject={() => handleRejectJob(inc.id)}
+                        />
                       ))}
                     </div>
                   )}
@@ -102,8 +210,8 @@ export function ProApp() {
           </>
         )}
 
-        {tab === "activity" && <Activity />}
-        {tab === "me" && <ProMe />}
+        {tab === "activity" && <Activity providerId={providerProfile?.id} />}
+        {tab === "me" && <ProMe profile={providerProfile} />}
       </div>
 
       {/* ETA sheet */}
@@ -117,7 +225,7 @@ export function ProApp() {
               {ETAS.map((e) => (
                 <button
                   key={e}
-                  onClick={() => { acceptIncoming(etaFor, e); setEtaFor(null); }}
+                  onClick={() => handleAcceptJob(etaFor, e)}
                   className="ncard h-16 grid place-items-center hover:border-namber transition-colors group"
                 >
                   <span className="text-center">
@@ -157,58 +265,41 @@ export function ProApp() {
 }
 
 /* ── incoming request card ── */
-function IncomingCard({ id, delay, onEta }: { id: string; delay: number; onEta: () => void }) {
-  const s = useApp();
-  const inc = s.inbox.find((i) => i.id === id)!;
-  const cat = catById(inc.catId);
-  const { str } = useCountdown(inc.expiresIn);
-  const isLinked = !!inc.jobId;
+function IncomingCard({ inc, delay, onAccept, onReject }: { inc: any; delay: number; onAccept: () => void; onReject: () => void }) {
+  const cat = catById(inc.category_id);
+  const zone = zoneById(inc.zone_id);
 
   return (
     <FadeUp d={delay}>
-      <article className={`ncard p-5 border ${isLinked ? "border-namber/60" : "border-nline"}`}>
+      <article className="ncard p-5 border border-nline">
         <div className="flex items-center gap-2.5">
           <span className="w-10 h-10 rounded-xl bg-nsurf text-namber grid place-items-center shrink-0">
-            <Icon name={cat.icon as never} className="w-5 h-5" strokeWidth={1.9} />
+            <Icon name={cat?.icon as never || "wrench"} className="w-5 h-5" strokeWidth={1.9} />
           </span>
           <div className="min-w-0 flex-1">
-            <p className="font-disp font-bold text-[0.95rem] text-ntxt leading-tight truncate">{cat.name}</p>
+            <p className="font-disp font-bold text-[0.95rem] text-ntxt leading-tight truncate">{cat?.name || "Servicio"}</p>
             <p className="text-[0.7rem] text-nmut font-semibold flex items-center gap-1.5 mt-0.5">
-              <Icon name="pin" className="w-3 h-3" strokeWidth={2.4} /> {zoneById(inc.zoneId).name} · {inc.km} km
+              <Icon name="pin" className="w-3 h-3" strokeWidth={2.4} /> {zone?.name || "Zona"}
             </p>
           </div>
-          {isLinked ? (
-            <span className="text-[0.6rem] font-extrabold uppercase tracking-wide text-namber bg-[#332a14] rounded-full px-2.5 py-1 shrink-0">Tu cliente</span>
-          ) : (
-            <span className="font-disp font-bold text-[0.9rem] text-nmut tabular-nums shrink-0">{str}</span>
-          )}
-        </div>
-
-        {/* client */}
-        <div className="flex items-center gap-2.5 mt-4">
-          <span className="w-8 h-8 rounded-full bg-nsurf grid place-items-center text-[0.65rem] font-disp font-bold text-nmut">
-            {inc.client.split(" ").map((w) => w[0]).join("")}
-          </span>
-          <p className="text-[0.8rem] font-bold text-ntxt">{inc.client}</p>
-          <span className="text-[0.72rem] text-nmut font-semibold inline-flex items-center gap-0.5"><span className="text-namber">★</span>{inc.clientRating.toFixed(1)}</span>
-          <span className="ml-auto font-disp font-bold text-[0.9rem] text-namber">{fmt(inc.price)}</span>
+          <span className="font-disp font-bold text-[0.9rem] text-namber">{fmt(inc.price_estimate || 0)}</span>
         </div>
 
         <p className="text-[0.82rem] text-nmut font-medium leading-relaxed mt-3.5 bg-nsurf rounded-xl px-4 py-3">
-          “{inc.problem}”
+          "{inc.description}"
         </p>
 
-        {inc.photos.length > 0 && (
-          <div className="flex gap-2 mt-3">
-            {inc.photos.map((pi) => (
-              <span key={pi} className="w-14 h-14 rounded-xl overflow-hidden bg-nsurf shrink-0"><JobPhoto i={pi} /></span>
-            ))}
-          </div>
-        )}
+        <div className="flex items-center gap-2.5 mt-4">
+          <span className="w-8 h-8 rounded-full bg-nsurf grid place-items-center text-[0.65rem] font-disp font-bold text-nmut">
+            {inc.customer?.name?.charAt(0) || "C"}
+          </span>
+          <p className="text-[0.8rem] font-bold text-ntxt">{inc.customer?.name || "Cliente"}</p>
+          <span className="text-[0.72rem] text-nmut font-semibold inline-flex items-center gap-0.5"><span className="text-namber">★</span>4.8</span>
+        </div>
 
         <div className="flex gap-3 mt-4">
-          <button onClick={() => dismissIncoming(inc.id)} className="btn-ghost-dark flex-1 h-12 text-[0.85rem]">Rechazar</button>
-          <button onClick={onEta} className="flex-[2] h-12 rounded-[14px] bg-namber text-[#33230a] font-extrabold text-[0.88rem] active:scale-95 transition-transform">
+          <button onClick={onReject} className="btn-ghost-dark flex-1 h-12 text-[0.85rem]">Rechazar</button>
+          <button onClick={onAccept} className="flex-[2] h-12 rounded-[14px] bg-namber text-[#33230a] font-extrabold text-[0.88rem] active:scale-95 transition-transform">
             Aceptar
           </button>
         </div>
@@ -218,44 +309,43 @@ function IncomingCard({ id, delay, onEta }: { id: string; delay: number; onEta: 
 }
 
 /* ── active job (in progress) ── */
-function ActiveJob() {
-  const s = useApp();
-  const a = s.proActive!;
-  const cat = catById(a.catId);
+function ActiveJob({ job, onAdvance }: { job: any; onAdvance: () => void }) {
+  const cat = catById(job.category_id);
+  const zone = zoneById(job.zone_id);
   const steps = [
-    { k: "enroute", l: "Ir hacia el cliente", ic: "car" },
+    { k: "on_the_way", l: "Ir hacia el cliente", ic: "car" },
     { k: "arrived", l: "He llegado", ic: "pin" },
-    { k: "started", l: "Servicio en curso", ic: "wrench" },
-    { k: "done", l: "Completado", ic: "check" },
+    { k: "in_progress", l: "Servicio en curso", ic: "wrench" },
+    { k: "completed", l: "Completado", ic: "check" },
   ];
-  const idx = steps.findIndex((x) => x.k === a.status);
-  const actionLabel = a.status === "enroute" ? "He llegado" : a.status === "arrived" ? "Iniciar servicio" : "Completar servicio";
+  const idx = steps.findIndex((x) => x.k === job.status);
+  const actionLabel = job.status === "on_the_way" ? "He llegado" : job.status === "arrived" ? "Iniciar servicio" : "Completar servicio";
 
   return (
     <section className="mt-7">
       <div className="flex items-center justify-between mb-3.5">
         <h3 className="font-disp font-bold text-[1.05rem]">Trabajo en curso</h3>
-        <span className="text-[0.64rem] font-extrabold uppercase tracking-wide text-namber bg-[#332a14] rounded-full px-2.5 py-1">~{a.etaMin} min</span>
+        <span className="text-[0.64rem] font-extrabold uppercase tracking-wide text-namber bg-[#332a14] rounded-full px-2.5 py-1">~{job.eta_min} min</span>
       </div>
 
       <FadeUp>
-        <MapCard dark moving={a.status === "enroute"} label={zoneById(a.zoneId).name} />
+        <MapCard dark moving={job.status === "on_the_way"} label={zone?.name || "Zona"} />
       </FadeUp>
 
       <FadeUp d={80}>
         <div className="ncard p-5 mt-4">
           <div className="flex items-center gap-3.5">
             <span className="w-11 h-11 rounded-xl bg-nsurf text-namber grid place-items-center shrink-0">
-              <Icon name={cat.icon as never} className="w-5.5 h-5.5" strokeWidth={1.8} />
+              <Icon name={cat?.icon as never || "wrench"} className="w-5.5 h-5.5" strokeWidth={1.8} />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="font-disp font-bold text-[1rem] text-ntxt leading-tight truncate">{a.client}</p>
-              <p className="text-[0.72rem] text-nmut font-semibold truncate mt-0.5">{cat.name} · {zoneById(a.zoneId).name}</p>
+              <p className="font-disp font-bold text-[1rem] text-ntxt leading-tight truncate">{job.customer?.name || "Cliente"}</p>
+              <p className="text-[0.72rem] text-nmut font-semibold truncate mt-0.5">{cat?.name || "Servicio"} · {zone?.name || "Zona"}</p>
             </div>
-            <span className="font-disp font-bold text-[1rem] text-namber shrink-0">{fmt(a.price)}</span>
+            <span className="font-disp font-bold text-[1rem] text-namber shrink-0">{fmt(job.price_estimate || 0)}</span>
           </div>
 
-          <p className="text-[0.82rem] text-nmut font-medium leading-relaxed mt-3.5 bg-nsurf rounded-xl px-4 py-3">“{a.problem}”</p>
+          <p className="text-[0.82rem] text-nmut font-medium leading-relaxed mt-3.5 bg-nsurf rounded-xl px-4 py-3">"{job.description}"</p>
 
           {/* mini timeline */}
           <div className="flex items-center gap-1.5 mt-4">
@@ -264,11 +354,11 @@ function ActiveJob() {
             ))}
           </div>
           <p className="text-[0.72rem] font-bold text-nmut mt-2.5 flex items-center gap-1.5">
-            <Icon name={steps[idx].ic as never} className="w-3.5 h-3.5 text-namber" strokeWidth={2.2} />
-            {steps[idx].l}
+            <Icon name={steps[idx]?.ic as never || "car"} className="w-3.5 h-3.5 text-namber" strokeWidth={2.2} />
+            {steps[idx]?.l || "En progreso"}
           </p>
 
-          <button onClick={advanceProJob} className="w-full h-13 py-3.5 mt-4 rounded-[14px] bg-namber text-[#33230a] font-extrabold text-[0.9rem] active:scale-95 transition-transform">
+          <button onClick={onAdvance} className="w-full h-13 py-3.5 mt-4 rounded-[14px] bg-namber text-[#33230a] font-extrabold text-[0.9rem] active:scale-95 transition-transform">
             {actionLabel}
           </button>
         </div>
@@ -278,65 +368,42 @@ function ActiveJob() {
 }
 
 /* ── activity tab ── */
-function Activity() {
-  const s = useApp();
-  const me = proById(CARLOS_ID);
-  const max = Math.max(...s.proStats.week, 1);
-  const days = ["L", "M", "X", "J", "V", "S", "D"];
+function Activity({ providerId }: { providerId?: string }) {
+  const [earnings, setEarnings] = useState<any>(null);
+
+  useEffect(() => {
+    if (providerId) {
+      api.providers.getEarnings("week").then(setEarnings).catch(console.error);
+    }
+  }, [providerId]);
+
   return (
     <div className="mt-7 space-y-5">
       <div className="grid grid-cols-2 gap-4">
         <div className="ncard p-5">
           <p className="text-[0.64rem] font-extrabold uppercase tracking-[0.16em] text-nmut">Servicios hoy</p>
-          <p className="font-disp font-bold text-[1.8rem] text-ntxt mt-1.5 leading-none">{s.proStats.today}</p>
+          <p className="font-disp font-bold text-[1.8rem] text-ntxt mt-1.5 leading-none">{earnings?.completedCount || 0}</p>
         </div>
         <div className="ncard p-5">
           <p className="text-[0.64rem] font-extrabold uppercase tracking-[0.16em] text-nmut">Ganancias hoy</p>
-          <p className="font-disp font-bold text-[1.4rem] text-namber mt-1.5 leading-none">{fmt(s.proStats.earnings)}</p>
-        </div>
-      </div>
-
-      <div className="ncard p-5">
-        <p className="text-[0.64rem] font-extrabold uppercase tracking-[0.16em] text-nmut mb-4">Esta semana</p>
-        <div className="flex items-end gap-2.5 h-28">
-          {s.proStats.week.map((v, i) => (
-            <div key={i} className="flex-1 flex flex-col items-center gap-2">
-              <div className="w-full rounded-t-lg bg-nsurf relative overflow-hidden" style={{ height: "100%" }}>
-                <div className="absolute bottom-0 inset-x-0 rounded-t-lg bg-namber/80" style={{ height: `${(v / max) * 100}%` }} />
-              </div>
-              <span className="text-[0.62rem] font-bold text-nmut">{days[i]}</span>
-            </div>
-          ))}
+          <p className="font-disp font-bold text-[1.4rem] text-namber mt-1.5 leading-none">{fmt(earnings?.earnings || 0)}</p>
         </div>
       </div>
 
       <div className="ncard p-5">
         <div className="flex items-center justify-between mb-1">
           <p className="text-[0.64rem] font-extrabold uppercase tracking-[0.16em] text-nmut">Tasa de aceptación</p>
-          <p className="font-disp font-bold text-[1rem] text-ntxt">{s.proStats.acceptRate}%</p>
+          <p className="font-disp font-bold text-[1rem] text-ntxt">96%</p>
         </div>
         <div className="h-2 rounded-full bg-nsurf overflow-hidden mt-2">
-          <div className="h-full rounded-full bg-[#4ade80]" style={{ width: `${s.proStats.acceptRate}%` }} />
+          <div className="h-full rounded-full bg-[#4ade80]" style={{ width: "96%" }} />
         </div>
       </div>
 
       <section>
         <h3 className="font-disp font-bold text-[1.05rem] mb-3.5">Reseñas recientes</h3>
-        <div className="space-y-3.5">
-          {me.reviewsList.map((r, i) => (
-            <FadeUp key={i} d={i * 70}>
-              <div className="ncard p-4">
-                <div className="flex items-center gap-3">
-                  <span className="w-8 h-8 rounded-full bg-nsurf text-nmut grid place-items-center text-[0.62rem] font-disp font-bold">
-                    {r.name.split(" ").map((w) => w[0]).join("")}
-                  </span>
-                  <p className="text-[0.82rem] font-bold text-ntxt flex-1">{r.name}</p>
-                  <Stars n={r.rating} />
-                </div>
-                <p className="text-[0.78rem] text-nmut font-medium leading-relaxed mt-2.5">{r.text}</p>
-              </div>
-            </FadeUp>
-          ))}
+        <div className="ncard p-4 text-center text-nmut">
+          <p className="text-[0.8rem]">Las reseñas aparecerán aquí cuando completes servicios.</p>
         </div>
       </section>
     </div>
@@ -344,29 +411,33 @@ function Activity() {
 }
 
 /* ── me tab ── */
-function ProMe() {
+function ProMe({ profile }: { profile: any }) {
   const s = useApp();
   const nav = useNavigate();
-  const me = proById(CARLOS_ID);
+
   return (
     <div className="mt-7 space-y-5">
       <div className="ncard p-5 flex items-center gap-4">
-        <Face face={me.face} name={me.name} size="w-16 h-16" />
+        <Face face={{ f: 1, q: 0 }} name={profile?.user?.name || "Proveedor"} size="w-16 h-16" />
         <div>
-          <p className="font-disp font-bold text-[1.1rem] text-ntxt">{s.session?.name ?? me.name}</p>
-          <p className="text-[0.76rem] text-nmut font-semibold mt-0.5">{me.tagline}</p>
-          <p className="text-[0.72rem] font-bold text-namber mt-1 inline-flex items-center gap-1"><span>★</span>{me.rating.toFixed(1)} · {me.jobs} trabajos</p>
+          <p className="font-disp font-bold text-[1.1rem] text-ntxt">{profile?.user?.name || "Proveedor"}</p>
+          <p className="text-[0.76rem] text-nmut font-semibold mt-0.5">{profile?.business_name || "Servicios profesionales"}</p>
+          <p className="text-[0.72rem] font-bold text-namber mt-1 inline-flex items-center gap-1">
+            <span>★</span>4.9 · {profile?.completed_jobs || 0} trabajos
+          </p>
         </div>
       </div>
 
       <div className="ncard p-5 border-namber/40">
-        <p className="text-[0.64rem] font-extrabold uppercase tracking-[0.16em] text-namber">Proveedor fundador</p>
-        <p className="font-disp font-bold text-[1rem] text-ntxt mt-1.5">Plan Pro gratis · {`2 meses restantes`}</p>
-        <p className="text-[0.76rem] text-nmut font-medium mt-1">Refiere colegas verificados y gana más meses.</p>
-        <div className="h-2 rounded-full bg-nsurf overflow-hidden mt-3">
-          <div className="h-full rounded-full bg-namber" style={{ width: "66%" }} />
-        </div>
-        <p className="text-[0.68rem] font-bold text-nmut mt-2">2 de 3 referidos para +1 mes</p>
+        <p className="text-[0.64rem] font-extrabold uppercase tracking-[0.16em] text-namber">Estado de verificación</p>
+        <p className="font-disp font-bold text-[1rem] text-ntxt mt-1.5">
+          {profile?.verification_status === "verified" ? "✓ Verificado" : "Pendiente de verificación"}
+        </p>
+        <p className="text-[0.76rem] text-nmut font-medium mt-1">
+          {profile?.verification_status === "verified"
+            ? "Puedes recibir solicitudes de clientes"
+            : "Tu perfil está siendo revisado por el equipo de Altoque"}
+        </p>
       </div>
 
       <div className="ncard divide-y divide-nline">

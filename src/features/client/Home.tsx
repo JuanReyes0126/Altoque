@@ -1,12 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "../../components/icons";
 import {
   Carousel, Face, FadeUp, ProCard, ProListItem, RowHead, Sheet, SkelCards, SkelList, useFakeLoad,
 } from "../../components/ui/kit";
 import {
-  CATS, GROUPS, PROS, ZONES, catById, prosByCat, searchAll, setRole, setZone, useApp, zoneById, type View,
+  CATS, GROUPS, PROS, ZONES, catById, prosByCat, searchAll, setRole, setZone, useApp, zoneById, type View, type Cat,
 } from "../../lib/state";
+import { api } from "../../lib/api";
 import { PATHS } from "../../lib/router";
 
 const HOME_CATS = ["plomeria", "electricidad", "aire", "cerrajeria", "limpieza", "mecanica", "pintura", "ebanisteria"];
@@ -18,7 +19,16 @@ export function ClientHome({ go }: { go: (v: View) => void }) {
   const { zoneId, session } = useApp();
   const nav = useNavigate();
   const [zoneOpen, setZoneOpen] = useState(false);
-  const loading = useFakeLoad(800);
+  const [categories, setCategories] = useState<Cat[]>(CATS);
+  const [loading, setLoading] = useState(true);
+
+  // F2: Cargar categorías reales desde el backend
+  useEffect(() => {
+    api.categories.list()
+      .then(setCategories)
+      .catch(() => setCategories(CATS)) // fallback a mock si falla
+      .finally(() => setLoading(false));
+  }, []);
 
   const available = PROS.filter((p) => p.available);
   const top = [...PROS].sort((a, b) => b.rating - a.rating || b.reviews - a.reviews).slice(0, 4);
@@ -91,21 +101,29 @@ export function ClientHome({ go }: { go: (v: View) => void }) {
         {/* categorías (servicios populares) */}
         <section className="mt-8">
           <RowHead title="Servicios populares" sub="Elige una categoría para empezar" />
-          <div className="grid grid-cols-4 sm:grid-cols-8 gap-3 sm:gap-4">
-            {HOME_CATS.map((id, i) => {
-              const c = catById(id);
-              return (
-                <FadeUp key={id} d={i * 45}>
-                  <button onClick={() => go({ t: "results", catId: id })} className="w-full flex flex-col items-center gap-2 group">
+          {loading ? (
+            <div className="grid grid-cols-4 sm:grid-cols-8 gap-3 sm:gap-4">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="flex flex-col items-center gap-2">
+                  <div className="w-full aspect-square max-w-[4.6rem] rounded-2xl skel" />
+                  <div className="skel h-3 w-12" />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-4 sm:grid-cols-8 gap-3 sm:gap-4">
+              {categories.slice(0, 8).map((c, i) => (
+                <FadeUp key={c.id} d={i * 45}>
+                  <button onClick={() => go({ t: "results", catId: c.id })} className="w-full flex flex-col items-center gap-2 group">
                     <span className="w-full aspect-square max-w-[4.6rem] rounded-2xl bg-card border border-line2 grid place-items-center shadow-card transition-all duration-200 group-hover:-translate-y-1 group-hover:shadow-lift group-hover:border-pine/40 group-active:scale-95">
                       <Icon name={c.icon as never} className="w-7 h-7 text-pine" strokeWidth={1.7} />
                     </span>
                     <span className="text-[0.7rem] font-bold text-ink leading-tight text-center">{c.name}</span>
                   </button>
                 </FadeUp>
-              );
-            })}
-          </div>
+              ))}
+            </div>
+          )}
         </section>
 
         {/* disponibles ahora */}
