@@ -15,6 +15,7 @@ type AdminTab = "dashboard" | "users" | "providers" | "requests" | "disputes" | 
 export function AdminHome() {
   const nav = useNavigate();
   const { session } = useApp();
+  const toast = useToast();
   const [tab, setTab] = useState<AdminTab>("dashboard");
   const [metrics, setMetrics] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -23,7 +24,7 @@ export function AdminHome() {
   useEffect(() => {
     api.admin.getMetrics()
       .then(setMetrics)
-      .catch(console.error)
+      .catch(() => toast.showToast("error", "Error al cargar métricas del dashboard"))
       .finally(() => setLoading(false));
   }, []);
 
@@ -147,11 +148,12 @@ function DashboardView({ metrics }: { metrics: any }) {
 function UsersView() {
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const toast = useToast();
 
   useEffect(() => {
     api.admin.getUsers()
       .then((res) => setUsers(res.data))
-      .catch(console.error)
+      .catch(() => toast.showToast("error", "Error al cargar usuarios"))
       .finally(() => setLoading(false));
   }, []);
 
@@ -285,11 +287,12 @@ function ProvidersView() {
 function RequestsView() {
   const [requests, setRequests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const toast = useToast();
 
   useEffect(() => {
     api.admin.getRequests()
       .then((res) => setRequests(res.data))
-      .catch(console.error)
+      .catch(() => toast.showToast("error", "Error al cargar solicitudes"))
       .finally(() => setLoading(false));
   }, []);
 
@@ -580,11 +583,12 @@ function ResolveDisputeModal({ dispute, onClose, onResolve }: { dispute: any; on
 function AuditView() {
   const [logs, setLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const toast = useToast();
 
   useEffect(() => {
     api.admin.getAuditLogs()
       .then((res) => setLogs(res.data))
-      .catch(console.error)
+      .catch(() => toast.showToast("error", "Error al cargar logs de auditoría"))
       .finally(() => setLoading(false));
   }, []);
 

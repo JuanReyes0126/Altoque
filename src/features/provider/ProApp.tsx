@@ -18,6 +18,7 @@ const ETAS = [10, 15, 20, 30, 45, 60];
 export function ProApp() {
   const s = useApp();
   const nav = useNavigate();
+  const toast = useToast();
   const [tab, setTab] = useState<ProTab>("home");
   const [providerProfile, setProviderProfile] = useState<any>(null);
   const [inbox, setInbox] = useState<any[]>([]);
@@ -42,7 +43,7 @@ export function ProApp() {
         const res = await api.providers.getInbox();
         setInbox(res.data);
       } catch (error) {
-        console.error("Error loading inbox:", error);
+        toast.showToast("error", "Error al cargar solicitudes disponibles");
       }
     };
 
@@ -74,7 +75,7 @@ export function ProApp() {
       await api.providers.setAvailability(newAvailability);
       setProviderProfile({ ...providerProfile, is_available: newAvailability });
     } catch (error) {
-      console.error("Error toggling availability:", error);
+      toast.showToast("error", "Error al cambiar disponibilidad");
     }
   };
 
@@ -82,6 +83,7 @@ export function ProApp() {
     try {
       await api.providers.claim(requestId, eta);
       setEtaFor(null);
+      toast.showToast("success", "Trabajo aceptado correctamente");
       // Recargar inbox y trabajo activo
       const [inboxRes, activeRes] = await Promise.all([
         api.providers.getInbox(),
@@ -90,7 +92,7 @@ export function ProApp() {
       setInbox(inboxRes.data);
       if (activeRes.data) setActiveJob(activeRes.data);
     } catch (error) {
-      console.error("Error accepting job:", error);
+      toast.showToast("error", "Error al aceptar el trabajo");
     }
   };
 
@@ -112,6 +114,7 @@ export function ProApp() {
 
     try {
       await api.providers.updateStatus(activeJob.id, nextStatus);
+      toast.showToast("success", "Estado actualizado correctamente");
       const res = await api.providers.getActiveJob();
       if (res.data) {
         setActiveJob(res.data);
@@ -119,7 +122,7 @@ export function ProApp() {
         setActiveJob(null);
       }
     } catch (error) {
-      console.error("Error advancing job:", error);
+      toast.showToast("error", "Error al actualizar el estado");
     }
   };
 
@@ -415,7 +418,7 @@ function Activity({ providerId }: { providerId?: string }) {
 
   useEffect(() => {
     if (providerId) {
-      api.providers.getEarnings("week").then(setEarnings).catch(console.error);
+      api.providers.getEarnings("week").then(setEarnings).catch(() => toast.showToast("error", "Error al cargar estadísticas"));
     }
   }, [providerId]);
 
