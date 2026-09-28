@@ -1,13 +1,12 @@
 -- ════════════════════════════════════════════════════════════════
--- ALTOQUE · Migración 0002: Añadir tabla file
+-- ALTOQUE · Migración: Añadir tabla file
 --
 -- Contexto: El modelo `file` fue añadido a schema.prisma en F2
 -- para soportar uploads de fotos de solicitudes. Esta migración
 -- crea la tabla correspondiente en PostgreSQL.
 --
 -- Aplicación:
---   1. Copiar este archivo a server/database/migrations/0002_add_file_table/
---   2. Ejecutar: npx prisma migrate deploy
+--   Ejecutar: npx prisma migrate deploy
 --
 -- NOTA: Esta migración NO debe aplicarse a Production sin revisión.
 -- ════════════════════════════════════════════════════════════════

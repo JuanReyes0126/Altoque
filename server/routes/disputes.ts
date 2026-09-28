@@ -18,6 +18,43 @@ import { audit } from "../lib/audit.js";
 
 export const disputeRoutes = new Hono<AuthEnv>();
 
+// ── GET /api/v1/disputes/admin/all ──
+// Listar todas las disputas (admin) - DEBE IR ANTES DE /:id para evitar colisión
+disputeRoutes.get("/admin/all", requireAuth, requireVerifiedEmail, requirePermission("disputes.resolve"), async (c) => {
+  const { page: pageNum, limit, skip } = parsePaging(c.req.query());
+  const status = c.req.query("status");
+
+  const where: any = {};
+  if (status) where.status = status;
+
+  const [disputes, total] = await Promise.all([
+    prisma.dispute.findMany({
+      where,
+      skip,
+      take: limit,
+      orderBy: { created_at: "desc" },
+      include: {
+        request: {
+          include: {
+            customer: { select: { id: true, name: true, email: true } },
+            provider: {
+              include: {
+                user: { select: { id: true, name: true, email: true } },
+              },
+            },
+            category: true,
+          },
+        },
+        opener: { select: { id: true, name: true, email: true } },
+        resolver: { select: { id: true, name: true, email: true } },
+      },
+    }),
+    prisma.dispute.count({ where }),
+  ]);
+
+  return c.json(page(disputes, pageMeta(pageNum, limit, total)));
+});
+
 // ── POST /api/v1/disputes ──
 // Crear disputa (cliente o proveedor de una solicitud)
 disputeRoutes.post("/", requireAuth, requireVerifiedEmail, async (c) => {
@@ -282,55 +319,26 @@ disputeRoutes.post("/:id/resolve", requireAuth, requireVerifiedEmail, requirePer
         body: `La disputa fue resuelta a favor de ${data.status === "resolved_customer" ? "tu solicitud" : "el proveedor"}.`,
         meta: { disputeId, status: data.status },
       },
-      {
+    ];
+
+    // Solo notificar al proveedor si existe
+    if (request.provider) {
+      notifications.push({
         id: ulid(),
         user_id: request.provider.user_id,
         kind: "dispute_resolved",
         title: "Disputa resuelta",
         body: `La disputa fue resuelta a favor de ${data.status === "resolved_provider" ? "tu trabajo" : "el cliente"}.`,
         meta: { disputeId, status: data.status },
-      },
-    ];
+      });
+    }
 
-    await prisma.notification.createMany({  notifications });
+    await prisma.notification.createMany({
+       {
+        data: notifications,
+      },
+    });
   }
 
   return c.json(ok(resolved));
-});
-
-// ── GET /api/v1/admin/disputes ──
-// Listar todas las disputas (admin)
-disputeRoutes.get("/admin/all", requireAuth, requireVerifiedEmail, requirePermission("disputes.resolve"), async (c) => {
-  const { page: pageNum, limit, skip } = parsePaging(c.req.query());
-  const status = c.req.query("status");
-
-  const where: any = {};
-  if (status) where.status = status;
-
-  const [disputes, total] = await Promise.all([
-    prisma.dispute.findMany({
-      where,
-      skip,
-      take: limit,
-      orderBy: { created_at: "desc" },
-      include: {
-        request: {
-          include: {
-            customer: { select: { id: true, name: true, email: true } },
-            provider: {
-              include: {
-                user: { select: { id: true, name: true, email: true } },
-              },
-            },
-            category: true,
-          },
-        },
-        opener: { select: { id: true, name: true, email: true } },
-        resolver: { select: { id: true, name: true, email: true } },
-      },
-    }),
-    prisma.dispute.count({ where }),
-  ]);
-
-  return c.json(page(disputes, pageMeta(pageNum, limit, total)));
 });
