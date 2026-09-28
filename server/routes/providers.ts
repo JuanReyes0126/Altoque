@@ -196,7 +196,7 @@ providerRoutes.get("/inbox", requireAuth, requireVerifiedEmail, async (c) => {
   const zoneIds = provider.provider_zone.map((z) => z.zone_id);
 
   const where = {
-    status: "searching",
+    status: "searching" as const,
     category_id: { in: categoryIds },
     zone_id: { in: zoneIds },
   };

@@ -25,8 +25,14 @@ export const err = (code: string, message: string, details?: unknown) => ({
 });
 
 /** Paginación segura desde query params (evita límites absurdos). */
-export function parsePaging(q: URLSearchParams, defaultLimit = 20, maxLimit = 100) {
-  const page = Math.max(1, Number(q.get("page") ?? "1") || 1);
-  const limit = Math.min(maxLimit, Math.max(1, Number(q.get("limit") ?? String(defaultLimit)) || defaultLimit));
+export function parsePaging(q: URLSearchParams | Record<string, string>, defaultLimit = 20, maxLimit = 100) {
+  const get = (key: string): string | null => {
+    if (q instanceof URLSearchParams) {
+      return q.get(key);
+    }
+    return q[key] ?? null;
+  };
+  const page = Math.max(1, Number(get("page") ?? "1") || 1);
+  const limit = Math.min(maxLimit, Math.max(1, Number(get("limit") ?? String(defaultLimit)) || defaultLimit));
   return { page, limit, skip: (page - 1) * limit };
 }

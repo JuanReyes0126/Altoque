@@ -364,5 +364,40 @@ export const api = {
       const res = await http<{ data: any[]; meta: any }>(`/api/v1/admin/audit${qs ? "?" + qs : ""}`);
       return res;
     },
+
+    /** POST /api/v1/disputes/:id/resolve - Resolver disputa */
+    resolveDispute: async (disputeId: string, status: "resolved_customer" | "resolved_provider", resolution: string) => {
+      const res = await http<{ data: any }>(`/api/v1/disputes/${disputeId}/resolve`, {
+        body: { status, resolution },
+      });
+      return res.data;
+    },
+  },
+
+  /* ── disputas ── F5: endpoints para cliente/proveedor */
+  disputes: {
+    /** POST /api/v1/disputes - Crear disputa */
+    create: async (requestId: string, reason: string) => {
+      const res = await http<{ data: any }>("/api/v1/disputes", {
+        body: { request_id: requestId, reason },
+      });
+      return res.data;
+    },
+
+    /** GET /api/v1/disputes - Listar disputas propias */
+    list: async (params?: { page?: number; limit?: number }) => {
+      const query = new URLSearchParams();
+      if (params?.page) query.set("page", String(params.page));
+      if (params?.limit) query.set("limit", String(params.limit));
+      const qs = query.toString();
+      const res = await http<{ data: any[]; meta: any }>(`/api/v1/disputes${qs ? "?" + qs : ""}`);
+      return res;
+    },
+
+    /** GET /api/v1/disputes/:id - Obtener disputa específica */
+    getById: async (id: string) => {
+      const res = await http<{ data: any }>(`/api/v1/disputes/${id}`);
+      return res.data;
+    },
   },
 };

@@ -333,7 +333,7 @@ requestRoutes.post("/:id/review", requireAuth, requireVerifiedEmail, async (c) =
         id: ulid(),
         request_id: id,
         reviewer_id: user.id,
-        provider_id: request.provider_id,
+        provider_id: request.provider_id!, // Validado arriba (línea 325-327)
         rating: data.rating,
         punctuality: data.punctuality,
         quality: data.quality,

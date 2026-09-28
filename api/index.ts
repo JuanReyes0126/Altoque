@@ -84,11 +84,15 @@ function buildRequest(req: IncomingMessage, body: Uint8Array | undefined): Reque
   const method = (req.method || "GET").toUpperCase();
   const headers = toWebHeaders(req);
   const hasBody = body !== undefined && method !== "GET" && method !== "HEAD";
-  return new Request(`${proto}://${host}${req.url || "/"}`, {
+  const init: any = {
     method,
     headers,
-    ...(hasBody ? { body, duplex: "half" as const } : {}),
-  });
+  };
+  if (hasBody) {
+    init.body = body;
+    init.duplex = "half";
+  }
+  return new Request(`${proto}://${host}${req.url || "/"}`, init);
 }
 
 /**

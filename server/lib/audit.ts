@@ -5,7 +5,7 @@
  * actuar sin registrar. El payload se sanitiza: jamás incluye
  * contraseñas, tokens ni contenido de documentos.
  */
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import type { Tx } from "../database/prisma.js";
 import { ulid } from "./ids.js";
 import type { AdminRole } from "./permissions.js";
@@ -69,7 +69,7 @@ export async function audit(db: PrismaClient | Tx, actor: AuditActor, input: Aud
       action: input.action,
       entity_type: input.entityType ?? null,
       entity_id: input.entityId ?? null,
-      metadata: sanitize(input.metadata) ?? undefined,
+      metadata: (sanitize(input.metadata) as any) ?? Prisma.JsonNull,
       ip: input.ip ?? null,
       user_agent: input.userAgent ?? null,
     },
