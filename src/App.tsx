@@ -8,6 +8,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { HashRouter, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { Icon } from "./components/icons";
+import { ToastProvider } from "./components/Toast";
 import { setSession, toast, useApp, type Tab, type View } from "./lib/state";
 import { authApi } from "./lib/api";
 import { PATHS, RequireRole, roleHome, tabPath, viewToPath } from "./lib/router";
@@ -180,27 +181,29 @@ export default function App() {
 
   return (
     <div className="p-root min-h-dvh">
-      <HashRouter>
-        <Routes>
-          {/* público */}
-          <Route path="/" element={<PublicHome />} />
-          <Route path="/proveedores" element={<ProviderOnboarding />} />
+      <ToastProvider>
+        <HashRouter>
+          <Routes>
+            {/* público */}
+            <Route path="/" element={<PublicHome />} />
+            <Route path="/proveedores" element={<ProviderOnboarding />} />
 
-          {/* cliente */}
-          <Route path="/app/*" element={<RequireRole roles={["customer"]}><ClientShell /></RequireRole>} />
+            {/* cliente */}
+            <Route path="/app/*" element={<RequireRole roles={["customer"]}><ClientShell /></RequireRole>} />
 
-          {/* proveedor — el modo pro es una capacidad de UI para cualquier cuenta
-              autenticada (modelo de doble capacidad); los PERMISOS reales los
-              decide el servidor en F3 (verification_status + RBAC). */}
-          <Route path="/pro" element={<RequireRole roles={["customer", "provider", "admin"]}><ProApp /></RequireRole>} />
+            {/* proveedor — el modo pro es una capacidad de UI para cualquier cuenta
+                autenticada (modelo de doble capacidad); los PERMISOS reales los
+                decide el servidor en F3 (verification_status + RBAC). */}
+            <Route path="/pro" element={<RequireRole roles={["customer", "provider", "admin"]}><ProApp /></RequireRole>} />
 
-          {/* admin (F4) */}
-          <Route path="/admin" element={<RequireRole roles={["admin"]}><AdminHome /></RequireRole>} />
+            {/* admin (F4) */}
+            <Route path="/admin" element={<RequireRole roles={["admin"]}><AdminHome /></RequireRole>} />
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </HashRouter>
       <Toast />
+      </ToastProvider>
     </div>
   );
 }

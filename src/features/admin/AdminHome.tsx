@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "../../components/icons";
+import { useToast } from "../../components/Toast";
 import { clearSession, useApp } from "../../lib/state";
 import { api, authApi } from "../../lib/api";
 import { PATHS } from "../../lib/router";
@@ -208,11 +209,16 @@ function UsersView() {
 function ProvidersView() {
   const [providers, setProviders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
 
   useEffect(() => {
     api.admin.getProviders()
       .then((res) => setProviders(res.data))
-      .catch(console.error)
+      .catch((err) => {
+        setError("Error al cargar proveedores");
+        toast.showToast("error", "Error al cargar la lista de proveedores");
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -220,8 +226,9 @@ function ProvidersView() {
     try {
       await api.admin.approveProvider(id);
       setProviders(providers.map((p) => p.id === id ? { ...p, verification_status: "verified" } : p));
-    } catch (error) {
-      console.error("Error approving provider:", error);
+      toast.showToast("success", "Proveedor aprobado correctamente");
+    } catch (err) {
+      toast.showToast("error", "Error al aprobar el proveedor");
     }
   };
 
@@ -229,8 +236,9 @@ function ProvidersView() {
     try {
       await api.admin.rejectProvider(id, "Rechazado por administrador");
       setProviders(providers.map((p) => p.id === id ? { ...p, verification_status: "rejected" } : p));
-    } catch (error) {
-      console.error("Error rejecting provider:", error);
+      toast.showToast("success", "Proveedor rechazado correctamente");
+    } catch (err) {
+      toast.showToast("error", "Error al rechazar el proveedor");
     }
   };
 
@@ -319,15 +327,49 @@ function RequestsView() {
 function DisputesView() {
   const [disputes, setDisputes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [resolveModal, setResolveModal] = useState<any>(null);
+  const toast = useToast();
 
   useEffect(() => {
-    api.admin.getDisputes()
-      .then((res) => setDisputes(res.data))
-      .catch(console.error)
-      .finally(() => setLoading(false));
+    loadDisputes();
   }, []);
 
+  const loadDisputes = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await api.admin.getDisputes();
+      setDisputes(res.data);
+    } catch (err) {
+      setError("Error al cargar disputas");
+      toast.showToast("error", "Error al cargar la lista de disputas");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResolve = async (disputeId: string, status: "resolved_customer" | "resolved_provider", resolution: string) => {
+    try {
+      await api.admin.resolveDispute(disputeId, status, resolution);
+      toast.showToast("success", "Disputa resuelta correctamente");
+      setResolveModal(null);
+      loadDisputes(); // Recargar lista
+    } catch (err) {
+      toast.showToast("error", "Error al resolver la disputa");
+    }
+  };
+
   if (loading) return <div className="text-center py-12 text-mut">Cargando disputas...</div>;
+
+  if (error) {
+    return (
+      <div className="text-center py-12">
+        <p className="text-cor font-bold mb-3">{error}</p>
+        <button onClick={loadDisputes} className="btn-ghost h-10 px-5 text-[0.85rem]">Reintentar</button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-3">
@@ -348,20 +390,189 @@ function DisputesView() {
                     d.status === "resolved_provider" ? "bg-pinesoft text-pine" :
                     "bg-tint text-mut"
                   }`}>
-                    {d.status}
+                    {d.status === "open" ? "Abierta" :
+                     d.status === "resolved_customer" ? "Resuelta (cliente)" :
+                     d.status === "resolved_provider" ? "Resuelta (proveedor)" :
+                     "Descartada"}
                   </span>
-                  <span className="text-[0.72rem] text-mut">Abierta por: {d.opener?.name}</span>
+                  <span className="text-[0.72rem] text-mut">Abierta por: {d.opener?.name || "Usuario"}</span>
                 </div>
+                {d.resolution && (
+                  <div className="mt-3 p-3 bg-tint rounded-xl">
+                    <p className="text-[0.72rem] font-bold text-mut uppercase tracking-wide mb-1">Resolución</p>
+                    <p className="text-[0.82rem] text-ink font-medium">{d.resolution}</p>
+                    {d.resolver && (
+                      <p className="text-[0.68rem] text-mut font-semibold mt-1">
+                        Resuelto por: {d.resolver.name}
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
               {d.status === "open" && (
                 <div className="flex gap-2">
-                  <button className="btn-pine h-9 px-4 text-[0.78rem]">Resolver</button>
+                  <button 
+                    onClick={() => setResolveModal(d)}
+                    className="btn-pine h-9 px-4 text-[0.78rem]"
+                  >
+                    Resolver
+                  </button>
                 </div>
               )}
             </div>
           </div>
         ))
       )}
+
+      {/* Modal de resolución de disputa */}
+      {resolveModal && (
+        <ResolveDisputeModal
+          dispute={resolveModal}
+          onClose={() => setResolveModal(null)}
+          onResolve={handleResolve}
+        />
+      )}
+    </div>
+  );
+}
+
+function ResolveDisputeModal({ dispute, onClose, onResolve }: { dispute: any; onClose: () => void; onResolve: (id: string, status: "resolved_customer" | "resolved_provider", resolution: string) => Promise<void> }) {
+  const [status, setStatus] = useState<"resolved_customer" | "resolved_provider">("resolved_customer");
+  const [resolution, setResolution] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (resolution.trim().length < 10) {
+      setError("La resolución debe tener al menos 10 caracteres");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      await onResolve(dispute.id, status, resolution.trim());
+    } catch (err) {
+      setError("Error al resolver la disputa");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-ink/50 backdrop-blur-sm animate-fadein">
+      <div className="bg-card rounded-2xl shadow-lift max-w-md w-full p-6 animate-pop">
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <h3 className="font-disp font-bold text-[1.2rem] text-ink">Resolver disputa</h3>
+            <p className="text-[0.82rem] text-mut font-medium mt-1">
+              Disputa #{dispute.id.slice(0, 8)}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            disabled={loading}
+            className="w-8 h-8 grid place-items-center rounded-full bg-tint text-mut hover:bg-line transition-colors"
+            aria-label="Cerrar"
+          >
+            <Icon name="x" className="w-4 h-4" strokeWidth={2.4} />
+          </button>
+        </div>
+
+        <div className="card p-4 mb-4 bg-tint/50">
+          <p className="text-[0.72rem] font-bold text-mut uppercase tracking-wide mb-1">Motivo original</p>
+          <p className="text-[0.85rem] text-ink font-medium">{dispute.reason}</p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-[0.78rem] font-bold text-ink mb-2">
+              Resolución *
+            </label>
+            <textarea
+              value={resolution}
+              onChange={(e) => setResolution(e.target.value)}
+              disabled={loading}
+              placeholder="Describe la resolución de la disputa..."
+              rows={4}
+              className="w-full card p-3 text-[0.88rem] font-medium text-ink placeholder:text-soft outline-none focus:border-pine/50 resize-none transition-colors disabled:opacity-50"
+              minLength={10}
+              maxLength={2000}
+              required
+            />
+            <p className="text-[0.72rem] text-soft font-semibold mt-1.5">
+              {resolution.length}/2000 caracteres (mínimo 10)
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-[0.78rem] font-bold text-ink mb-2">
+              ¿A quién favorece la resolución? *
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setStatus("resolved_customer")}
+                disabled={loading}
+                className={`h-12 rounded-xl font-bold text-[0.85rem] transition-all ${
+                  status === "resolved_customer"
+                    ? "bg-oksoft text-ok border-2 border-ok"
+                    : "bg-tint text-mut border-2 border-transparent hover:border-line"
+                }`}
+              >
+                Cliente
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatus("resolved_provider")}
+                disabled={loading}
+                className={`h-12 rounded-xl font-bold text-[0.85rem] transition-all ${
+                  status === "resolved_provider"
+                    ? "bg-pinesoft text-pine border-2 border-pine"
+                    : "bg-tint text-mut border-2 border-transparent hover:border-line"
+                }`}
+              >
+                Proveedor
+              </button>
+            </div>
+          </div>
+
+          {error && (
+            <div className="rounded-xl bg-corsoft text-cor px-4 py-3 text-[0.82rem] font-bold flex items-start gap-2.5">
+              <Icon name="alert" className="w-4 h-4 shrink-0 mt-0.5" strokeWidth={2.2} />
+              <span>{error}</span>
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={loading}
+              className="btn-ghost flex-1 h-12 text-[0.88rem]"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={loading || resolution.trim().length < 10}
+              className="btn-pine flex-1 h-12 text-[0.88rem] disabled:opacity-50"
+            >
+              {loading ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  Resolviendo...
+                </>
+              ) : (
+                <>
+                  <Icon name="check" className="w-4 h-4" strokeWidth={2.4} />
+                  Resolver disputa
+                </>
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

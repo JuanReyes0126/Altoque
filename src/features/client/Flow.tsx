@@ -2,12 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "../../components/icons";
 import { AvailDot, Face, FadeUp, JobPhoto, MapCard, ProListItem, Radar, RowHead, Stars, Verif, useFakeLoad } from "../../components/ui/kit";
+import { useToast } from "../../components/Toast";
 import {
   CATS, JOB_IMGS, PROBLEMS, ZONES, catById, clearSession, fmt, proById, prosByCat,
   setRole, toggleFav, useApp, zoneById, type Tab, type View,
 } from "../../lib/state";
 import { api, authApi } from "../../lib/api";
 import { PATHS } from "../../lib/router";
+import { DisputeModal } from "./DisputeModal";
+import { DisputeView } from "./DisputeView";
 
 // Mapeo centralizado de estados del backend al frontend
 function mapBackendStatus(backendStatus: string): string {
@@ -22,6 +25,7 @@ function mapBackendStatus(backendStatus: string): string {
 /* ════════════════ REQUEST WIZARD ════════════════ */
 export function RequestWizard({ catId: initCat, proId, go }: { catId?: string; proId?: string; go: (v: View) => void }) {
   const s = useApp();
+  const toast = useToast();
   const prePro = proId ? proById(proId) : null;
   const [catId, setCatId] = useState(initCat ?? prePro?.cats[0] ?? "");
   const [problem, setProblem] = useState("");
@@ -65,8 +69,7 @@ export function RequestWizard({ catId: initCat, proId, go }: { catId?: string; p
       // Navegar al tracking usando el ID real del backend
       go({ t: "track", jobId: realRequest.id });
     } catch (error) {
-      console.error("Error creating request:", error);
-      // TODO: Mostrar error al usuario
+      toast.showToast("error", "Error al crear la solicitud. Intenta nuevamente.");
     }
   };
 
@@ -162,8 +165,7 @@ export function RequestWizard({ catId: initCat, proId, go }: { catId?: string; p
                       const preview = URL.createObjectURL(file);
                       setPhotos([...photos, { id: result.id, blob_key: result.blob_key, preview }]);
                     } catch (error) {
-                      console.error("Error uploading photo:", error);
-                      // TODO: Mostrar error al usuario
+                      toast.showToast("error", "Error al subir la foto. Intenta nuevamente.");
                     } finally {
                       setUploading(false);
                     }
@@ -351,6 +353,7 @@ function Timeline({ status }: { status: string }) {
 
 export function TrackingView({ jobId, go, jump }: { jobId: string; go: (v: View) => void; jump: (t: Tab) => void }) {
   const s = useApp();
+  const toast = useToast();
   const localJob = s.jobs.find((j) => j.id === jobId);
   const [backendJob, setBackendJob] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -359,6 +362,8 @@ export function TrackingView({ jobId, go, jump }: { jobId: string; go: (v: View)
   const [text, setText] = useState("");
   const [sent, setSent] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [disputeOpen, setDisputeOpen] = useState(false);
+  const [disputeKey, setDisputeKey] = useState(0); // Para forzar recarga de DisputeView
 
   // F2: Cargar datos reales del backend
   useEffect(() => {
@@ -562,9 +567,9 @@ export function TrackingView({ jobId, go, jump }: { jobId: string; go: (v: View)
                       try {
                         await api.requests.review(job.id, { rating, comment: text });
                         setSent(true);
+                        toast.showToast("success", "¡Reseña enviada correctamente!");
                       } catch (error) {
-                        console.error("Error submitting review:", error);
-                        // TODO: Mostrar error al usuario
+                        toast.showToast("error", "Error al enviar la reseña. Intenta nuevamente.");
                       }
                     }} disabled={!rating} className="btn-pine w-full h-13 py-3.5 text-[0.88rem] mt-4">
                       Enviar reseña
@@ -574,7 +579,37 @@ export function TrackingView({ jobId, go, jump }: { jobId: string; go: (v: View)
               </section>
             </FadeUp>
           )}
+
+          {/* Disputa - solo para solicitudes completadas/confirmadas/revisadas */}
+          {(job.status === "done" || job.status === "confirmed" || job.status === "reviewed") && (
+            <FadeUp d={260}>
+              <DisputeView requestId={job.id} key={disputeKey} />
+              
+              {/* Botón para abrir disputa si no existe una */}
+              <div className="mt-4">
+                <button
+                  onClick={() => setDisputeOpen(true)}
+                  className="w-full btn-ghost h-12 text-[0.85rem] text-cor border-cor/30 hover:border-cor/60"
+                >
+                  <Icon name="alert" className="w-4 h-4" strokeWidth={2.2} />
+                  Abrir disputa sobre este servicio
+                </button>
+              </div>
+            </FadeUp>
+          )}
         </>
+      )}
+
+      {/* dispute modal */}
+      {disputeOpen && (
+        <DisputeModal
+          requestId={job.id}
+          onClose={() => setDisputeOpen(false)}
+          onSuccess={() => {
+            setDisputeOpen(false);
+            setDisputeKey(k => k + 1); // Forzar recarga de DisputeView
+          }}
+        />
       )}
 
       {/* cancel sheet */}
@@ -590,10 +625,10 @@ export function TrackingView({ jobId, go, jump }: { jobId: string; go: (v: View)
                 try {
                   await api.requests.cancel(job.id);
                   setCancelOpen(false);
+                  toast.showToast("success", "Solicitud cancelada correctamente");
                   jump("jobs");
                 } catch (error) {
-                  console.error("Error canceling request:", error);
-                  // TODO: Mostrar error al usuario
+                  toast.showToast("error", "Error al cancelar la solicitud. Intenta nuevamente.");
                 }
               }} className="flex-1 h-12 rounded-[14px] bg-cor text-white font-bold text-[0.85rem] active:scale-95 transition-transform">Cancelar servicio</button>
             </div>
