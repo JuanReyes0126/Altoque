@@ -115,7 +115,7 @@ adminRoutes.post("/users/:id/suspend", requireAuth, requireVerifiedEmail, requir
 
   const user = await prisma.user.update({
     where: { id: userId },
-     { status: "suspended" },
+    data: { status: "suspended" },
   });
 
   await audit(prisma, {
@@ -147,7 +147,7 @@ adminRoutes.post("/users/:id/block", requireAuth, requireVerifiedEmail, requireP
 
   const user = await prisma.user.update({
     where: { id: userId },
-     { status: "blocked" },
+    data: { status: "blocked" },
   });
 
   await audit(prisma, {
@@ -205,7 +205,7 @@ adminRoutes.post("/providers/:id/approve", requireAuth, requireVerifiedEmail, re
 
   const provider = await prisma.provider_profile.update({
     where: { id: providerId },
-     {
+    data: {
       verification_status: "verified",
     },
     include: { user: true },
@@ -214,7 +214,7 @@ adminRoutes.post("/providers/:id/approve", requireAuth, requireVerifiedEmail, re
   // Actualizar rol del usuario a provider
   await prisma.user.update({
     where: { id: provider.user_id },
-     { role: "provider" },
+    data: { role: "provider" },
   });
 
   await audit(prisma, {
@@ -228,7 +228,7 @@ adminRoutes.post("/providers/:id/approve", requireAuth, requireVerifiedEmail, re
   });
 
   await prisma.provider_verification_history.create({
-     {
+    data: {
       id: ulid(),
       provider_id: providerId,
       from_status: "pending_verification",
@@ -256,7 +256,7 @@ adminRoutes.post("/providers/:id/reject", requireAuth, requireVerifiedEmail, req
 
   const provider = await prisma.provider_profile.update({
     where: { id: providerId },
-     {
+    data: {
       verification_status: "rejected",
     },
   });
@@ -273,7 +273,7 @@ adminRoutes.post("/providers/:id/reject", requireAuth, requireVerifiedEmail, req
   });
 
   await prisma.provider_verification_history.create({
-     {
+    data: {
       id: ulid(),
       provider_id: providerId,
       from_status: "pending_verification",

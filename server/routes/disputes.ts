@@ -109,7 +109,7 @@ disputeRoutes.post("/", requireAuth, requireVerifiedEmail, async (c) => {
 
   // Crear disputa
   const dispute = await prisma.dispute.create({
-     {
+    data: {
       id: ulid(),
       request_id: data.request_id,
       opened_by: user.id,
@@ -138,16 +138,14 @@ disputeRoutes.post("/", requireAuth, requireVerifiedEmail, async (c) => {
 
   if (admins.length > 0) {
     await prisma.notification.createMany({
-       {
-        data: admins.map((admin) => ({
-          id: ulid(),
-          user_id: admin.id,
-          kind: "dispute_opened",
-          title: "Nueva disputa abierta",
-          body: `Se ha abierto una disputa para la solicitud ${request.code}`,
-          meta: { disputeId: dispute.id, requestId: request.id },
-        })),
-      },
+      data: admins.map((admin) => ({
+        id: ulid(),
+        user_id: admin.id,
+        kind: "dispute_opened",
+        title: "Nueva disputa abierta",
+        body: `Se ha abierto una disputa para la solicitud ${request.code}`,
+        meta: { disputeId: dispute.id, requestId: request.id },
+      })),
     });
   }
 
@@ -279,7 +277,7 @@ disputeRoutes.post("/:id/resolve", requireAuth, requireVerifiedEmail, requirePer
   // Resolver disputa
   const resolved = await prisma.dispute.update({
     where: { id: disputeId },
-     {
+    data: {
       status: data.status,
       resolved_by: admin.id,
       resolution: data.resolution,
@@ -298,7 +296,7 @@ disputeRoutes.post("/:id/resolve", requireAuth, requireVerifiedEmail, requirePer
     action: "DISPUTE_RESOLVED",
     entityType: "dispute",
     entityId: disputeId,
-    meta { status: data.status, resolution: data.resolution },
+    metadata: { status: data.status, resolution: data.resolution },
   });
 
   // Notificar a las partes
@@ -334,9 +332,7 @@ disputeRoutes.post("/:id/resolve", requireAuth, requireVerifiedEmail, requirePer
     }
 
     await prisma.notification.createMany({
-       {
-        data: notifications,
-      },
+      data: notifications,
     });
   }
 

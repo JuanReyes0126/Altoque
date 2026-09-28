@@ -72,7 +72,7 @@ providerRoutes.post("/me", requireAuth, requireVerifiedEmail, async (c) => {
   // Crear perfil en transacción
   const provider = await prisma.$transaction(async (tx) => {
     const newProvider = await tx.provider_profile.create({
-       {
+      data: {
         id: ulid(),
         user_id: user.id,
         business_name: data.business_name,
@@ -85,7 +85,7 @@ providerRoutes.post("/me", requireAuth, requireVerifiedEmail, async (c) => {
 
     // Añadir categorías
     await tx.provider_service.createMany({
-       data.categories.map((categoryId) => ({
+      data: data.category_ids.map((categoryId) => ({
         provider_id: newProvider.id,
         category_id: categoryId,
         price_from: 0,
@@ -94,7 +94,7 @@ providerRoutes.post("/me", requireAuth, requireVerifiedEmail, async (c) => {
 
     // Añadir zonas
     await tx.provider_zone.createMany({
-       data.zone_ids.map((zoneId) => ({
+      data: data.zone_ids.map((zoneId) => ({
         provider_id: newProvider.id,
         zone_id: zoneId,
       })),
@@ -123,7 +123,7 @@ providerRoutes.patch("/me", requireAuth, requireVerifiedEmail, async (c) => {
 
   const provider = await prisma.provider_profile.update({
     where: { user_id: user.id },
-     {
+    data: {
       ...data,
     },
   });
@@ -157,7 +157,7 @@ providerRoutes.patch("/availability", requireAuth, requireVerifiedEmail, async (
 
   const updated = await prisma.provider_profile.update({
     where: { user_id: user.id },
-     {
+    data: {
       is_available: data.is_available,
       available_since: data.is_available ? new Date() : null,
     },
@@ -296,14 +296,14 @@ providerRoutes.post("/requests/:id/status", requireAuth, requireVerifiedEmail, a
   await prisma.$transaction(async (tx) => {
     await tx.service_request.update({
       where: { id: requestId },
-       {
+      data: {
         status: data.status as any,
         completed_at: data.status === "completed" ? new Date() : undefined,
       },
     });
 
     await tx.request_status_history.create({
-       {
+      data: {
         id: ulid(),
         request_id: requestId,
         from_status: request.status,
@@ -323,7 +323,7 @@ providerRoutes.post("/requests/:id/status", requireAuth, requireVerifiedEmail, a
     }[data.status];
 
     await tx.notification.create({
-       {
+      data: {
         id: ulid(),
         user_id: request.customer_id,
         kind: notificationKind,
