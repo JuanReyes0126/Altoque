@@ -24,6 +24,7 @@ import { meRoutes } from "./routes/me.js";
 import { requestRoutes } from "./routes/requests.js";
 import { uploadRoutes } from "./routes/uploads.js";
 import { providerRoutes } from "./routes/providers.js";
+import { providerPublicRoutes } from "./routes/providers-public.js";
 import { adminRoutes } from "./routes/admin.js";
 import { disputeRoutes } from "./routes/disputes.js";
 
@@ -104,6 +105,7 @@ app.route("/api/v1", meRoutes);
 // ── dominio F2 ──
 app.route("/api/v1/requests", requestRoutes);
 app.route("/api/v1/uploads", uploadRoutes);
+app.route("/api/v1/providers", providerPublicRoutes);
 
 // ── dominio F3 ──
 app.route("/api/v1/provider", providerRoutes);

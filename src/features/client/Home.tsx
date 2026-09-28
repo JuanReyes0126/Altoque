@@ -20,18 +20,42 @@ export function ClientHome({ go }: { go: (v: View) => void }) {
   const nav = useNavigate();
   const [zoneOpen, setZoneOpen] = useState(false);
   const [categories, setCategories] = useState<Cat[]>(CATS);
+  const [availableProviders, setAvailableProviders] = useState<any[]>([]);
+  const [topProviders, setTopProviders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // F2: Cargar categorías reales desde el backend
+  // F2: Cargar categorías y proveedores reales desde el backend
   useEffect(() => {
-    api.categories.list()
-      .then(setCategories)
-      .catch(() => setCategories(CATS)) // fallback a mock si falla
-      .finally(() => setLoading(false));
+    const loadData = async () => {
+      try {
+        setError(null);
+        
+        // Cargar categorías
+        const cats = await api.categories.list();
+        setCategories(cats);
+        
+        // Cargar proveedores disponibles
+        const available = await api.providersPublic.getAvailable(8);
+        setAvailableProviders(available);
+        
+        // Cargar top providers (mejor valorados)
+        const top = await api.providersPublic.list({ sort: "rating", limit: 4 });
+        setTopProviders(top.data);
+        
+      } catch (err) {
+        console.error("Error loading data:", err);
+        setError("No se pudieron cargar los datos. Por favor, intenta de nuevo.");
+        // Fallback a mocks solo para categorías
+        setCategories(CATS);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    loadData();
   }, []);
 
-  const available = PROS.filter((p) => p.available);
-  const top = [...PROS].sort((a, b) => b.rating - a.rating || b.reviews - a.reviews).slice(0, 4);
   const zone = zoneById(zoneId);
   const firstName = (session?.name ?? "María Peralta").split(" ")[0];
 
@@ -132,10 +156,28 @@ export function ClientHome({ go }: { go: (v: View) => void }) {
             icon="bolt" title="Disponibles ahora" sub="Listos para ir a tu zona"
             action={{ label: "Ver todos", fn: () => go({ t: "results", catId: "plomeria" }) }}
           />
-          {loading ? <SkelCards n={4} /> : (
+          {loading ? (
+            <SkelCards n={4} />
+          ) : error ? (
+            <div className="text-center py-8">
+              <p className="text-mut">{error}</p>
+              <button onClick={() => window.location.reload()} className="btn-ghost h-10 px-5 mt-3 text-[0.85rem]">
+                Reintentar
+              </button>
+            </div>
+          ) : availableProviders.length === 0 ? (
+            <div className="text-center py-8">
+              <p className="text-mut">No hay proveedores disponibles en este momento</p>
+            </div>
+          ) : (
             <Carousel>
-              {available.slice(0, 8).map((p) => (
-                <ProCard key={p.id} p={p} onOpen={() => go({ t: "pro", id: p.id })} onRequest={() => go({ t: "request", proId: p.id })} />
+              {availableProviders.map((p) => (
+                <ProCard 
+                  key={p.id} 
+                  p={p} 
+                  onOpen={() => go({ t: "pro", id: p.id })} 
+                  onRequest={() => go({ t: "request", proId: p.id })} 
+                />
               ))}
             </Carousel>
           )}
@@ -169,10 +211,26 @@ export function ClientHome({ go }: { go: (v: View) => void }) {
         {/* mejor valorados */}
         <section className="mt-10">
           <RowHead icon="star" title="Mejor valorados" sub={`${zone.name} y alrededores`} />
-          {loading ? <SkelList n={4} /> : (
+          {loading ? (
+            <SkelList n={4} />
+          ) : error ? (
+            <div className="text-center py-8">
+              <p className="text-mut">{error}</p>
+            </div>
+          ) : topProviders.length === 0 ? (
+            <div className="text-center py-8">
+              <p className="text-mut">Aún no hay proveedores valorados</p>
+            </div>
+          ) : (
             <div className="grid md:grid-cols-2 gap-4">
-              {top.map((p, i) => (
-                <ProListItem key={p.id} p={p} delay={i * 70} onOpen={() => go({ t: "pro", id: p.id })} onRequest={() => go({ t: "request", proId: p.id })} />
+              {topProviders.map((p, i) => (
+                <ProListItem 
+                  key={p.id} 
+                  p={p} 
+                  delay={i * 70} 
+                  onOpen={() => go({ t: "pro", id: p.id })} 
+                  onRequest={() => go({ t: "request", proId: p.id })} 
+                />
               ))}
             </div>
           )}

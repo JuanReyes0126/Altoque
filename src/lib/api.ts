@@ -98,6 +98,30 @@ export const api = {
     list: (): Zone[] => ZONES, // por ahora mock, no hay endpoint
     get: zoneById,
   },
+  
+  /* ── proveedores públicos ── F2: GET /providers */
+  providersPublic: {
+    list: async (params?: { category?: string; zone?: string; available?: boolean; sort?: string; page?: number; limit?: number }) => {
+      const query = new URLSearchParams();
+      if (params?.category) query.set("category", params.category);
+      if (params?.zone) query.set("zone", params.zone);
+      if (params?.available !== undefined) query.set("available", String(params.available));
+      if (params?.sort) query.set("sort", params.sort);
+      if (params?.page) query.set("page", String(params.page));
+      if (params?.limit) query.set("limit", String(params.limit));
+      const qs = query.toString();
+      const res = await http<{ data: any[]; meta: any }>(`/api/v1/providers${qs ? "?" + qs : ""}`);
+      return res;
+    },
+    getById: async (id: string) => {
+      const res = await http<{ data: any }>(`/api/v1/providers/${id}`);
+      return res.data;
+    },
+    getAvailable: async (limit = 10) => {
+      const res = await http<{ data: any[] }>(`/api/v1/providers/available?limit=${limit}`);
+      return res.data;
+    },
+  },
 
   /* ── catálogo de proveedores ── F2: GET /pros?cat&zone&available&verified&sort&page&limit */
   prospects: {
