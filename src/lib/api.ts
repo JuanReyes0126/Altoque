@@ -252,12 +252,8 @@ export const api = {
 
     /** GET /api/v1/provider/active-job - Trabajo activo actual */
     getActiveJob: async () => {
-      try {
-        const res = await http<{ data: any }>("/api/v1/provider/active-job");
-        return res;
-      } catch {
-        return { data: null };
-      }
+      const res = await http<{ data: { job: any } }>("/api/v1/provider/active-job");
+      return res;
     },
   },
 

@@ -352,46 +352,52 @@ function Timeline({ status }: { status: string }) {
 }
 
 export function TrackingView({ jobId, go, jump }: { jobId: string; go: (v: View) => void; jump: (t: Tab) => void }) {
-  const s = useApp();
   const toast = useToast();
-  const localJob = s.jobs.find((j) => j.id === jobId);
   const [backendJob, setBackendJob] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [rating, setRating] = useState(0);
   const [hover, setHover] = useState(0);
   const [text, setText] = useState("");
   const [sent, setSent] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [disputeOpen, setDisputeOpen] = useState(false);
-  const [disputeKey, setDisputeKey] = useState(0); // Para forzar recarga de DisputeView
-  const [disputeExists, setDisputeExists] = useState(false); // Trackea si existe disputa
+  const [disputeKey, setDisputeKey] = useState(0);
+  const [disputeExists, setDisputeExists] = useState(false);
 
-  // F2: Cargar datos reales del backend
+  // F2: Cargar datos reales del backend (source of truth)
+  const loadJob = async () => {
+    try {
+      setError(null);
+      const data = await api.requests.getById(jobId);
+      setBackendJob(data);
+      setLoading(false);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Error al cargar la solicitud";
+      setError(errorMessage);
+      setLoading(false);
+      toast.showToast("error", errorMessage);
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
-    const loadJob = async () => {
-      try {
-        const data = await api.requests.getById(jobId);
-        if (!cancelled) {
-          setBackendJob(data);
-          setLoading(false);
-        }
-      } catch (error) {
-        console.error("Error loading job from backend:", error);
-        if (!cancelled) setLoading(false);
-      }
+    
+    const loadJobSafe = async () => {
+      if (cancelled) return;
+      await loadJob();
     };
 
-    loadJob();
+    loadJobSafe();
     // Polling cada 5 segundos para actualizar estado
-    const interval = setInterval(loadJob, 5000);
+    const interval = setInterval(loadJobSafe, 5000);
     return () => {
       cancelled = true;
       clearInterval(interval);
     };
   }, [jobId]);
 
-  // Usar datos del backend si están disponibles, sino usar estado local
+  // Usar SOLO datos del backend
   const job = backendJob ? {
     id: backendJob.id,
     catId: backendJob.category_id,
@@ -408,11 +414,11 @@ export function TrackingView({ jobId, go, jump }: { jobId: string; go: (v: View)
     rating: backendJob.review?.rating,
     reviewText: backendJob.review?.comment,
     createdAt: new Date(backendJob.created_at).getTime(),
-  } : localJob;
+  } : null;
 
   useEffect(() => { window.scrollTo({ top: 0 }); }, [job?.status]);
 
-  if (loading || !job) {
+  if (loading) {
     return (
       <div className="max-w-2xl mx-auto px-5 pb-32">
         <div className="mt-14 flex flex-col items-center text-center">
@@ -420,6 +426,27 @@ export function TrackingView({ jobId, go, jump }: { jobId: string; go: (v: View)
             <Icon name="doc" className="w-8 h-8 text-pine" strokeWidth={1.7} />
           </div>
           <p className="font-disp font-bold text-[1.1rem] text-ink mt-5">Cargando solicitud…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !job) {
+    return (
+      <div className="max-w-2xl mx-auto px-5 pb-32">
+        <div className="mt-14 flex flex-col items-center text-center">
+          <div className="w-16 h-16 rounded-full bg-corsoft grid place-items-center">
+            <Icon name="alert" className="w-8 h-8 text-cor" strokeWidth={1.7} />
+          </div>
+          <p className="font-disp font-bold text-[1.1rem] text-ink mt-5">
+            {error || "Solicitud no encontrada"}
+          </p>
+          <button onClick={loadJob} className="btn-ghost h-10 px-5 mt-4">
+            Reintentar
+          </button>
+          <button onClick={() => jump("jobs")} className="btn-ghost h-10 px-5 mt-2">
+            Volver a mis solicitudes
+          </button>
         </div>
       </div>
     );
@@ -648,55 +675,61 @@ export function TrackingView({ jobId, go, jump }: { jobId: string; go: (v: View)
 
 /* ════════════════ SOLICITUDES (tab) ════════════════ */
 export function RequestsTab({ go }: { go: (v: View) => void }) {
-  const s = useApp();
+  const toast = useToast();
   const [backendJobs, setBackendJobs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // F2: Cargar solicitudes reales del backend
+  // F2: Cargar solicitudes reales del backend (source of truth)
+  const loadJobs = async () => {
+    try {
+      setError(null);
+      const res = await api.requests.list();
+      setBackendJobs(res.data);
+      setLoading(false);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Error al cargar solicitudes";
+      setError(errorMessage);
+      setLoading(false);
+      toast.showToast("error", errorMessage);
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
-    const loadJobs = async () => {
-      try {
-        const res = await api.requests.list();
-        if (!cancelled) {
-          setBackendJobs(res.data);
-          setLoading(false);
-        }
-      } catch (error) {
-        console.error("Error loading jobs from backend:", error);
-        if (!cancelled) setLoading(false);
-      }
+    
+    const loadJobsSafe = async () => {
+      if (cancelled) return;
+      await loadJobs();
     };
 
-    loadJobs();
+    loadJobsSafe();
     // Polling cada 10 segundos para actualizar lista
-    const interval = setInterval(loadJobs, 10000);
+    const interval = setInterval(loadJobsSafe, 10000);
     return () => {
       cancelled = true;
       clearInterval(interval);
     };
   }, []);
 
-  // Combinar datos del backend con estado local (fallback)
-  const allJobs = backendJobs.length > 0
-    ? backendJobs.map((bj) => ({
-        id: bj.id,
-        catId: bj.category_id,
-        problem: bj.description,
-        photos: [],
-        when: bj.when_type === "scheduled" ? "later" : bj.when_type,
-        zoneId: bj.zone_id,
-        note: "",
-        proId: bj.provider_id,
-        status: mapBackendStatus(bj.status),
-        etaMin: bj.eta_min,
-        etaLeft: undefined,
-        scheduledFor: bj.scheduled_at,
-        rating: bj.review?.rating,
-        reviewText: bj.review?.comment,
-        createdAt: new Date(bj.created_at).getTime(),
-      }))
-    : s.jobs;
+  // Usar SOLO datos del backend
+  const allJobs = backendJobs.map((bj) => ({
+    id: bj.id,
+    catId: bj.category_id,
+    problem: bj.description,
+    photos: [],
+    when: bj.when_type === "scheduled" ? "later" : bj.when_type,
+    zoneId: bj.zone_id,
+    note: "",
+    proId: bj.provider_id,
+    status: mapBackendStatus(bj.status),
+    etaMin: bj.eta_min,
+    etaLeft: undefined,
+    scheduledFor: bj.scheduled_at,
+    rating: bj.review?.rating,
+    reviewText: bj.review?.comment,
+    createdAt: new Date(bj.created_at).getTime(),
+  }));
 
   const active = allJobs.filter((j) => j.status !== "done" || !j.rating);
   const done = allJobs.filter((j) => j.status === "done" && j.rating);
@@ -709,6 +742,13 @@ export function RequestsTab({ go }: { go: (v: View) => void }) {
           {[0, 1].map((i) => (
             <div key={i} className="card p-5"><div className="skel h-4 w-1/2" /><div className="skel h-3 w-2/3 mt-3" /><div className="skel h-9 w-full mt-4" /></div>
           ))}
+        </div>
+      ) : error ? (
+        <div className="text-center py-24">
+          <span className="w-16 h-16 rounded-2xl bg-corsoft text-cor grid place-items-center mx-auto"><Icon name="alert" className="w-8 h-8" strokeWidth={1.7} /></span>
+          <p className="font-disp font-bold text-[1.1rem] text-ink mt-5">Error al cargar solicitudes</p>
+          <p className="text-[0.85rem] text-mut font-medium mt-1">{error}</p>
+          <button onClick={loadJobs} className="btn-ghost h-12 px-6 text-[0.85rem] mt-6">Reintentar</button>
         </div>
       ) : allJobs.length === 0 ? (
         <div className="text-center py-24">

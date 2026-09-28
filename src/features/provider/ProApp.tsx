@@ -54,12 +54,22 @@ export function ProApp() {
 
   // F3: Cargar trabajo activo si existe
   useEffect(() => {
+    let isFirstLoad = true;
+    
     const loadActiveJob = async () => {
       try {
         const res = await api.providers.getActiveJob();
-        if (res.data) setActiveJob(res.data);
+        // Respuesta legítima: puede tener job o null
+        setActiveJob(res.data?.job || null);
+        isFirstLoad = false;
       } catch (error) {
-        // No hay trabajo activo
+        // Error real de API/red
+        if (isFirstLoad) {
+          // Solo mostrar error en la primera carga
+          toast.showToast("error", "Error al cargar trabajo activo");
+        }
+        // En polling, no perder datos válidos ya cargados
+        isFirstLoad = false;
       }
     };
 
@@ -415,6 +425,7 @@ function ActiveJob({ job, onAdvance }: { job: any; onAdvance: () => void }) {
 /* ── activity tab ── */
 function Activity({ providerId }: { providerId?: string }) {
   const [earnings, setEarnings] = useState<any>(null);
+  const toast = useToast();
 
   useEffect(() => {
     if (providerId) {
