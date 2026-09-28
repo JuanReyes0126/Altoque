@@ -342,6 +342,42 @@ providerRoutes.post("/requests/:id/status", requireAuth, requireVerifiedEmail, a
   return c.json(ok({ message: "Estado actualizado" }));
 });
 
+// ── GET /api/v1/provider/active-job ──
+// Obtener el trabajo activo actual del proveedor
+providerRoutes.get("/active-job", requireAuth, requireVerifiedEmail, async (c) => {
+  const { user } = c.get("auth");
+
+  const provider = await prisma.provider_profile.findUnique({
+    where: { user_id: user.id },
+  });
+
+  if (!provider) {
+    throw AppError.notFound("Perfil de proveedor");
+  }
+
+  // Buscar trabajo activo (estados intermedios)
+  const activeJob = await prisma.service_request.findFirst({
+    where: {
+      provider_id: provider.id,
+      status: { in: ["accepted", "on_the_way", "arrived", "in_progress"] },
+    },
+    include: {
+      customer: {
+        select: { id: true, name: true, email: true },
+      },
+      category: true,
+      zone: true,
+      address: true,
+      request_photo: {
+        orderBy: { sort: "asc" },
+      },
+    },
+  });
+
+  // Si no hay trabajo activo, devolver null en data
+  return c.json(ok({ job: activeJob }));
+});
+
 // ── GET /api/v1/provider/earnings ──
 // Estadísticas de ingresos del proveedor
 providerRoutes.get("/earnings", requireAuth, requireVerifiedEmail, async (c) => {

@@ -11,8 +11,8 @@
                 { error:{code,message} } para fallos (F1).
    ════════════════════════════════════════════════════════════════ */
 import {
-  CATS, PROS, ZONES, acceptIncoming, advanceJob, advanceProJob, catById, createJob, getState,
-  proById, prosByCat, rateJob, searchAll, setProAvailable, toggleFav, zoneById,
+  CATS, PROS, ZONES, catById, getState,
+  proById, prosByCat, searchAll, setProAvailable, toggleFav, zoneById,
 } from "./state";
 import { http } from "./http";
 import type { Cat, Pro, Role, Session, Zone } from "../types";
@@ -261,13 +261,108 @@ export const api = {
     },
   },
 
-  /* ── admin ── F4: todo desde PostgreSQL real + audit log obligatorio por mutación */
+  /* ── admin ── F6: endpoints reales */
   admin: {
-    // GET /admin/metrics — en F0 devuelve la forma esperada; en F4, datos reales
-    metrics: () => ({
-      users: 12482, providers: 1204, providersVerified: 968, requestsToday: 342,
-      completedToday: 287, pendingProviders: 12, openDisputes: 4, avgRating: 4.82,
-    }),
-    // GET /admin/audit?action=&actor=&from=&to= — append-only, export solo para SUPER_ADMIN
+    /** GET /api/v1/admin/metrics - Dashboard con métricas reales */
+    getMetrics: async () => {
+      const res = await http<{ data: any }>("/api/v1/admin/metrics");
+      return res.data;
+    },
+
+    /** GET /api/v1/admin/users - Listar usuarios */
+    getUsers: async (params?: { page?: number; limit?: number; role?: string; status?: string; q?: string }) => {
+      const query = new URLSearchParams();
+      if (params?.page) query.set("page", String(params.page));
+      if (params?.limit) query.set("limit", String(params.limit));
+      if (params?.role) query.set("role", params.role);
+      if (params?.status) query.set("status", params.status);
+      if (params?.q) query.set("q", params.q);
+      const qs = query.toString();
+      const res = await http<{ data: any[]; meta: any }>(`/api/v1/admin/users${qs ? "?" + qs : ""}`);
+      return res;
+    },
+
+    /** POST /api/v1/admin/users/:id/suspend - Suspender usuario */
+    suspendUser: async (userId: string, reason?: string) => {
+      const res = await http<{ data: any }>(`/api/v1/admin/users/${userId}/suspend`, {
+        body: { reason },
+      });
+      return res.data;
+    },
+
+    /** POST /api/v1/admin/users/:id/block - Bloquear usuario */
+    blockUser: async (userId: string, reason?: string) => {
+      const res = await http<{ data: any }>(`/api/v1/admin/users/${userId}/block`, {
+        body: { reason },
+      });
+      return res.data;
+    },
+
+    /** GET /api/v1/admin/providers - Listar proveedores */
+    getProviders: async (params?: { page?: number; limit?: number; status?: string }) => {
+      const query = new URLSearchParams();
+      if (params?.page) query.set("page", String(params.page));
+      if (params?.limit) query.set("limit", String(params.limit));
+      if (params?.status) query.set("status", params.status);
+      const qs = query.toString();
+      const res = await http<{ data: any[]; meta: any }>(`/api/v1/admin/providers${qs ? "?" + qs : ""}`);
+      return res;
+    },
+
+    /** POST /api/v1/admin/providers/:id/approve - Aprobar proveedor */
+    approveProvider: async (providerId: string) => {
+      const res = await http<{ data: any }>(`/api/v1/admin/providers/${providerId}/approve`, {
+        body: {},
+      });
+      return res.data;
+    },
+
+    /** POST /api/v1/admin/providers/:id/reject - Rechazar proveedor */
+    rejectProvider: async (providerId: string, reason: string) => {
+      const res = await http<{ data: any }>(`/api/v1/admin/providers/${providerId}/reject`, {
+        body: { reason },
+      });
+      return res.data;
+    },
+
+    /** GET /api/v1/admin/requests - Listar solicitudes */
+    getRequests: async (params?: { page?: number; limit?: number; status?: string }) => {
+      const query = new URLSearchParams();
+      if (params?.page) query.set("page", String(params.page));
+      if (params?.limit) query.set("limit", String(params.limit));
+      if (params?.status) query.set("status", params.status);
+      const qs = query.toString();
+      const res = await http<{ data: any[]; meta: any }>(`/api/v1/admin/requests${qs ? "?" + qs : ""}`);
+      return res;
+    },
+
+    /** GET /api/v1/admin/requests/:id/timeline - Timeline de solicitud */
+    getRequestTimeline: async (requestId: string) => {
+      const res = await http<{ data: any }>(`/api/v1/admin/requests/${requestId}/timeline`);
+      return res.data;
+    },
+
+    /** GET /api/v1/admin/disputes - Listar disputas */
+    getDisputes: async (params?: { page?: number; limit?: number; status?: string }) => {
+      const query = new URLSearchParams();
+      if (params?.page) query.set("page", String(params.page));
+      if (params?.limit) query.set("limit", String(params.limit));
+      if (params?.status) query.set("status", params.status);
+      const qs = query.toString();
+      const res = await http<{ data: any[]; meta: any }>(`/api/v1/disputes/admin/all${qs ? "?" + qs : ""}`);
+      return res;
+    },
+
+    /** GET /api/v1/admin/audit - Logs de auditoría */
+    getAuditLogs: async (params?: { page?: number; limit?: number; action?: string; actor?: string }) => {
+      const query = new URLSearchParams();
+      if (params?.page) query.set("page", String(params.page));
+      if (params?.limit) query.set("limit", String(params.limit));
+      if (params?.action) query.set("action", params.action);
+      if (params?.actor) query.set("actor", params.actor);
+      const qs = query.toString();
+      const res = await http<{ data: any[]; meta: any }>(`/api/v1/admin/audit${qs ? "?" + qs : ""}`);
+      return res;
+    },
   },
 };

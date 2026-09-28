@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Icon } from "../../components/icons";
 import { AvailDot, Face, FadeUp, JobPhoto, MapCard, ProListItem, Radar, RowHead, Stars, Verif, useFakeLoad } from "../../components/ui/kit";
 import {
-  CATS, JOB_IMGS, PROBLEMS, ZONES, catById, clearSession, createJob, fmt, proById, prosByCat,
+  CATS, JOB_IMGS, PROBLEMS, ZONES, catById, clearSession, fmt, proById, prosByCat,
   setRole, toggleFav, useApp, zoneById, type Tab, type View,
 } from "../../lib/state";
 import { api, authApi } from "../../lib/api";
@@ -50,7 +50,7 @@ export function RequestWizard({ catId: initCat, proId, go }: { catId?: string; p
 
   const submit = async () => {
     try {
-      // F2: Llamar al backend real para crear la solicitud
+      // F2: Crear solicitud real en el backend
       const realRequest = await api.requests.create({
         category_id: catId,
         zone_id: zoneId,
@@ -62,19 +62,7 @@ export function RequestWizard({ catId: initCat, proId, go }: { catId?: string; p
         photos: photos.map((p, i) => ({ blob_key: p.blob_key, sort: i })),
       });
 
-      // Crear entrada local temporal usando el ID real de PostgreSQL
-      createJob({
-        catId,
-        problem: problem.trim(),
-        photos: photos.map((p, i) => i), // Convertir a formato legacy para estado local
-        when,
-        zoneId,
-        note: "",
-        scheduledFor: when === "later" ? `${sched.date} · ${sched.hora}` : undefined,
-        proId: selPro || undefined,
-        id: realRequest.id, // Usar el ID real del backend
-      });
-
+      // Navegar al tracking usando el ID real del backend
       go({ t: "track", jobId: realRequest.id });
     } catch (error) {
       console.error("Error creating request:", error);

@@ -25,6 +25,7 @@ import { requestRoutes } from "./routes/requests.js";
 import { uploadRoutes } from "./routes/uploads.js";
 import { providerRoutes } from "./routes/providers.js";
 import { adminRoutes } from "./routes/admin.js";
+import { disputeRoutes } from "./routes/disputes.js";
 
 export const app = new Hono<AuthEnv>();
 
@@ -106,6 +107,9 @@ app.route("/api/v1/uploads", uploadRoutes);
 
 // ── dominio F3 ──
 app.route("/api/v1/provider", providerRoutes);
+
+// ── dominio F5 ──
+app.route("/api/v1/disputes", disputeRoutes);
 
 // ── dominio F6 ──
 app.route("/api/v1/admin", adminRoutes);
