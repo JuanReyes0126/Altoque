@@ -22,12 +22,12 @@ interface Dispute {
   resolver?: { name: string };
 }
 
-interface DisputeViewProps {
+interface ProDisputeViewProps {
   requestId: string;
   onDisputeExists?: (exists: boolean) => void;
 }
 
-export function DisputeView({ requestId, onDisputeExists }: DisputeViewProps) {
+export function ProDisputeView({ requestId, onDisputeExists }: ProDisputeViewProps) {
   const [dispute, setDispute] = useState<Dispute | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -54,12 +54,12 @@ export function DisputeView({ requestId, onDisputeExists }: DisputeViewProps) {
 
   if (loading) {
     return (
-      <div className="card p-5 mt-4">
+      <div className="ncard p-5 mt-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-tint animate-pulse" />
+          <div className="w-10 h-10 rounded-full bg-nsurf animate-pulse" />
           <div className="flex-1 space-y-2">
-            <div className="h-4 bg-tint rounded animate-pulse w-1/3" />
-            <div className="h-3 bg-tint rounded animate-pulse w-2/3" />
+            <div className="h-4 bg-nsurf rounded animate-pulse w-1/3" />
+            <div className="h-3 bg-nsurf rounded animate-pulse w-2/3" />
           </div>
         </div>
       </div>
@@ -73,21 +73,21 @@ export function DisputeView({ requestId, onDisputeExists }: DisputeViewProps) {
   const statusConfig = {
     open: { label: "Abierta", color: "bg-sunsoft text-sun2", icon: "alert" },
     resolved_customer: { label: "Resuelta a favor del cliente", color: "bg-oksoft text-ok", icon: "check" },
-    resolved_provider: { label: "Resuelta a favor del proveedor", color: "bg-pinesoft text-pine", icon: "check" },
+    resolved_provider: { label: "Resuelta a tu favor", color: "bg-pinesoft text-pine", icon: "check" },
     dismissed: { label: "Descartada", color: "bg-tint text-mut", icon: "x" },
   };
 
   const config = statusConfig[dispute.status];
 
   return (
-    <div className="card p-5 mt-4 border-cor/30 bg-corsoft/30">
+    <div className="ncard p-5 mt-4 border-namber/30">
       <div className="flex items-start gap-3 mb-3">
-        <span className="w-10 h-10 rounded-xl bg-corsoft text-cor grid place-items-center shrink-0">
+        <span className="w-10 h-10 rounded-xl bg-namber/20 text-namber grid place-items-center shrink-0">
           <Icon name="alert" className="w-5 h-5" strokeWidth={2} />
         </span>
         <div className="flex-1">
-          <p className="font-disp font-bold text-[0.95rem] text-ink">Disputa activa</p>
-          <p className="text-[0.72rem] text-mut font-semibold mt-0.5">
+          <p className="font-disp font-bold text-[0.95rem] text-ntxt">Disputa sobre este servicio</p>
+          <p className="text-[0.72rem] text-nmut font-semibold mt-0.5">
             Abierta el {new Date(dispute.created_at).toLocaleDateString("es-DO")}
           </p>
         </div>
@@ -99,16 +99,16 @@ export function DisputeView({ requestId, onDisputeExists }: DisputeViewProps) {
 
       <div className="space-y-3">
         <div>
-          <p className="text-[0.72rem] font-bold text-mut uppercase tracking-wide mb-1">Motivo</p>
-          <p className="text-[0.85rem] text-ink font-medium leading-relaxed">{dispute.reason}</p>
+          <p className="text-[0.72rem] font-bold text-nmut uppercase tracking-wide mb-1">Motivo</p>
+          <p className="text-[0.85rem] text-ntxt font-medium leading-relaxed">{dispute.reason}</p>
         </div>
 
         {dispute.resolution && (
           <div>
-            <p className="text-[0.72rem] font-bold text-mut uppercase tracking-wide mb-1">Resolución</p>
-            <p className="text-[0.85rem] text-ink font-medium leading-relaxed">{dispute.resolution}</p>
+            <p className="text-[0.72rem] font-bold text-nmut uppercase tracking-wide mb-1">Resolución</p>
+            <p className="text-[0.85rem] text-ntxt font-medium leading-relaxed">{dispute.resolution}</p>
             {dispute.resolver && (
-              <p className="text-[0.72rem] text-mut font-semibold mt-1">
+              <p className="text-[0.72rem] text-nmut font-semibold mt-1">
                 Resuelto por: {dispute.resolver.name}
               </p>
             )}
@@ -116,11 +116,11 @@ export function DisputeView({ requestId, onDisputeExists }: DisputeViewProps) {
         )}
 
         {dispute.status === "open" && (
-          <div className="rounded-xl bg-sunsoft/50 px-4 py-3 mt-3">
-            <p className="text-[0.78rem] text-sun2 font-bold flex items-start gap-2">
+          <div className="rounded-xl bg-namber/10 px-4 py-3 mt-3">
+            <p className="text-[0.78rem] text-namber font-bold flex items-start gap-2">
               <Icon name="clock" className="w-4 h-4 shrink-0 mt-0.5" strokeWidth={2} />
               <span>
-                Tu disputa está siendo revisada por el equipo de Altoque. Te notificaremos cuando haya una resolución.
+                Esta disputa está siendo revisada por el equipo de Altoque. Te notificaremos cuando haya una resolución.
               </span>
             </p>
           </div>

@@ -2,12 +2,15 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "../../components/icons";
 import { Face, FadeUp, JobPhoto, MapCard, Stars, Toggle, useCountdown } from "../../components/ui/kit";
+import { useToast } from "../../components/Toast";
 import {
   catById, clearSession, fmt,
   setRole, useApp, zoneById,
 } from "../../lib/state";
 import { api, authApi } from "../../lib/api";
 import { PATHS } from "../../lib/router";
+import { ProDisputeModal } from "./ProDisputeModal";
+import { ProDisputeView } from "./ProDisputeView";
 
 type ProTab = "home" | "activity" | "me";
 const ETAS = [10, 15, 20, 30, 45, 60];
@@ -312,6 +315,9 @@ function IncomingCard({ inc, delay, onAccept, onReject }: { inc: any; delay: num
 function ActiveJob({ job, onAdvance }: { job: any; onAdvance: () => void }) {
   const cat = catById(job.category_id);
   const zone = zoneById(job.zone_id);
+  const [disputeOpen, setDisputeOpen] = useState(false);
+  const [disputeExists, setDisputeExists] = useState(false);
+  const [disputeKey, setDisputeKey] = useState(0);
   const steps = [
     { k: "on_the_way", l: "Ir hacia el cliente", ic: "car" },
     { k: "arrived", l: "He llegado", ic: "pin" },
@@ -363,6 +369,42 @@ function ActiveJob({ job, onAdvance }: { job: any; onAdvance: () => void }) {
           </button>
         </div>
       </FadeUp>
+
+      {/* Disputa - solo para trabajos completados */}
+      {job.status === "completed" && (
+        <FadeUp d={160}>
+          <ProDisputeView 
+            requestId={job.id} 
+            key={disputeKey}
+            onDisputeExists={setDisputeExists}
+          />
+          
+          {/* Botón para abrir disputa solo si NO existe una */}
+          {!disputeExists && (
+            <div className="mt-4">
+              <button
+                onClick={() => setDisputeOpen(true)}
+                className="w-full btn-ghost-dark h-12 text-[0.85rem] text-namber border-namber/30 hover:border-namber/60"
+              >
+                <Icon name="alert" className="w-4 h-4" strokeWidth={2.2} />
+                Abrir disputa sobre este servicio
+              </button>
+            </div>
+          )}
+        </FadeUp>
+      )}
+
+      {/* dispute modal */}
+      {disputeOpen && (
+        <ProDisputeModal
+          requestId={job.id}
+          onClose={() => setDisputeOpen(false)}
+          onSuccess={() => {
+            setDisputeOpen(false);
+            setDisputeKey(k => k + 1);
+          }}
+        />
+      )}
     </section>
   );
 }

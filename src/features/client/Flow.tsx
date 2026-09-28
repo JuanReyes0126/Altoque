@@ -364,6 +364,7 @@ export function TrackingView({ jobId, go, jump }: { jobId: string; go: (v: View)
   const [cancelOpen, setCancelOpen] = useState(false);
   const [disputeOpen, setDisputeOpen] = useState(false);
   const [disputeKey, setDisputeKey] = useState(0); // Para forzar recarga de DisputeView
+  const [disputeExists, setDisputeExists] = useState(false); // Trackea si existe disputa
 
   // F2: Cargar datos reales del backend
   useEffect(() => {
@@ -583,18 +584,24 @@ export function TrackingView({ jobId, go, jump }: { jobId: string; go: (v: View)
           {/* Disputa - solo para solicitudes completadas/confirmadas/revisadas */}
           {(job.status === "done" || job.status === "confirmed" || job.status === "reviewed") && (
             <FadeUp d={260}>
-              <DisputeView requestId={job.id} key={disputeKey} />
+              <DisputeView 
+                requestId={job.id} 
+                key={disputeKey}
+                onDisputeExists={setDisputeExists}
+              />
               
-              {/* Botón para abrir disputa si no existe una */}
-              <div className="mt-4">
-                <button
-                  onClick={() => setDisputeOpen(true)}
-                  className="w-full btn-ghost h-12 text-[0.85rem] text-cor border-cor/30 hover:border-cor/60"
-                >
-                  <Icon name="alert" className="w-4 h-4" strokeWidth={2.2} />
-                  Abrir disputa sobre este servicio
-                </button>
-              </div>
+              {/* Botón para abrir disputa solo si NO existe una */}
+              {!disputeExists && (
+                <div className="mt-4">
+                  <button
+                    onClick={() => setDisputeOpen(true)}
+                    className="w-full btn-ghost h-12 text-[0.85rem] text-cor border-cor/30 hover:border-cor/60"
+                  >
+                    <Icon name="alert" className="w-4 h-4" strokeWidth={2.2} />
+                    Abrir disputa sobre este servicio
+                  </button>
+                </div>
+              )}
             </FadeUp>
           )}
         </>
