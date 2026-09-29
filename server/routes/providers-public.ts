@@ -144,6 +144,98 @@ providerPublicRoutes.get("/", async (c) => {
   }
 });
 
+// ── GET /api/v1/providers/available ──
+// Lista de proveedores disponibles ahora (para "disponibles ahora" en landing)
+// NOTA: Debe ir ANTES de /:id para evitar que "available" sea capturado como :id
+providerPublicRoutes.get("/available", async (c) => {
+  const limit = Math.min(parseInt(c.req.query("limit") || "10"), 50);
+
+  try {
+    const providers = await prisma.provider_profile.findMany({
+      where: {
+        verification_status: "verified",
+        is_available: true,
+      },
+      take: limit,
+      orderBy: {
+        created_at: "desc",
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            image: true,
+          },
+        },
+        provider_service: {
+          include: {
+            category: {
+              select: {
+                id: true,
+                name: true,
+                icon: true,
+              },
+            },
+          },
+          take: 3, // Solo primeras 3 categorías
+        },
+        provider_zone: {
+          include: {
+            zone: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+          take: 5, // Solo primeras 5 zonas
+        },
+        review: {
+          select: {
+            rating: true,
+          },
+        },
+      },
+    });
+
+    // Transformar datos
+    const availableProviders = providers.map((p) => {
+      const ratings = p.review.map((r) => r.rating);
+      const avgRating = ratings.length > 0
+        ? ratings.reduce((sum, r) => sum + r, 0) / ratings.length
+        : 0;
+
+      return {
+        id: p.id,
+        name: p.user.name,
+        image: p.user.image,
+        business_name: p.business_name,
+        rating: Math.round(avgRating * 10) / 10,
+        reviews_count: p.review.length,
+        avg_eta_min: p.avg_eta_min,
+        categories: p.provider_service.map((ps) => ({
+          id: ps.category.id,
+          name: ps.category.name,
+          icon: ps.category.icon,
+        })),
+        zones: p.provider_zone.map((pz) => ({
+          id: pz.zone.id,
+          name: pz.zone.name,
+        })),
+      };
+    });
+
+    // Ordenar por rating
+    availableProviders.sort((a, b) => b.rating - a.rating);
+
+    return c.json(ok(availableProviders));
+  } catch (error) {
+    console.error("Error fetching available providers:", error);
+    throw new AppError("INTERNAL_ERROR", "Error al obtener proveedores disponibles", 500);
+  }
+});
+
 // ── GET /api/v1/providers/:id ──
 // Detalle público de un proveedor específico
 providerPublicRoutes.get("/:id", async (c) => {

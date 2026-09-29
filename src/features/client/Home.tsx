@@ -5,7 +5,7 @@ import {
   Carousel, Face, FadeUp, ProCard, ProListItem, RowHead, Sheet, SkelCards, SkelList, useFakeLoad,
 } from "../../components/ui/kit";
 import {
-  CATS, GROUPS, PROS, ZONES, catById, prosByCat, searchAll, setRole, setZone, useApp, zoneById, type View, type Cat,
+  GROUPS, ZONES, catById, prosByCat, searchAll, setRole, setZone, useApp, zoneById, type View, type Cat,
 } from "../../lib/state";
 import { api } from "../../lib/api";
 import { PATHS } from "../../lib/router";
@@ -19,7 +19,7 @@ export function ClientHome({ go }: { go: (v: View) => void }) {
   const { zoneId, session } = useApp();
   const nav = useNavigate();
   const [zoneOpen, setZoneOpen] = useState(false);
-  const [categories, setCategories] = useState<Cat[]>(CATS);
+  const [categories, setCategories] = useState<Cat[]>([]);
   const [availableProviders, setAvailableProviders] = useState<any[]>([]);
   const [topProviders, setTopProviders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,8 +46,7 @@ export function ClientHome({ go }: { go: (v: View) => void }) {
       } catch (err) {
         console.error("Error loading data:", err);
         setError("No se pudieron cargar los datos. Por favor, intenta de nuevo.");
-        // Fallback a mocks solo para categorías
-        setCategories(CATS);
+        setCategories([]);
       } finally {
         setLoading(false);
       }
@@ -238,7 +237,7 @@ export function ClientHome({ go }: { go: (v: View) => void }) {
 
         {/* grupos */}
         {GROUPS.map((g) => {
-          const cats = CATS.filter((c) => c.group === g).slice(0, 4);
+          const cats = categories.filter((c) => c.group === g).slice(0, 4);
           if (cats.length === 0) return null;
           return (
             <section key={g} className="mt-10">
@@ -301,7 +300,26 @@ export function ClientHome({ go }: { go: (v: View) => void }) {
 /* ─────────────────────────── EXPLORAR ─────────────────────────── */
 export function ExploreView({ go }: { go: (v: View) => void }) {
   const [q, setQ] = useState("");
+  const [categories, setCategories] = useState<Cat[]>([]);
+  const [loading, setLoading] = useState(true);
   const res = searchAll(q);
+
+  useEffect(() => {
+    const loadCategories = async () => {
+      try {
+        const cats = await api.categories.list();
+        setCategories(cats);
+      } catch (err) {
+        console.error("Error loading categories:", err);
+        setCategories([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    loadCategories();
+  }, []);
+
   return (
     <div className="max-w-6xl mx-auto px-5 pb-10">
       <header className="pt-4 sticky top-0 z-40 bg-paper/90 backdrop-blur-md pb-3">
@@ -366,7 +384,7 @@ export function ExploreView({ go }: { go: (v: View) => void }) {
             <section key={g} className="mb-9 mt-6">
               <p className="font-disp font-bold text-[1.05rem] text-ink mb-3">{g}</p>
               <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3">
-                {CATS.filter((c) => c.group === g).map((c) => (
+                {categories.filter((c) => c.group === g).map((c) => (
                   <button key={c.id} onClick={() => go({ t: "results", catId: c.id })} className="card card-h p-3.5 flex flex-col items-center gap-2 text-center group">
                     <span className="w-12 h-12 rounded-xl bg-pinesoft text-pine grid place-items-center group-hover:bg-pine group-hover:text-white transition-colors">
                       <Icon name={c.icon as never} className="w-6 h-6" strokeWidth={1.8} />
