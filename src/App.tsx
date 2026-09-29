@@ -65,8 +65,6 @@ function ClientShell() {
   else if (seg[1] === "solicitud" && seg[2]) view = <TrackingView key={seg[2]} jobId={seg[2]} go={go} jump={jump} />;
   else view = <Navigate to={PATHS.app} replace />;
 
-  const activeCount = s.jobs.filter((j) => j.status !== "done" || !j.rating).length;
-
   return (
     <div className="min-h-dvh">
       <div className="pb-24">{view}</div>
@@ -84,14 +82,7 @@ function ClientShell() {
                   className={`relative flex flex-col items-center justify-center gap-1 rounded-[1.2rem] mx-1 my-1.5 transition-all duration-200 ${active ? "bg-pinesoft text-pine" : "text-soft hover:text-mut"}`}
                   aria-label={t.l}
                 >
-                  <span className="relative">
-                    <Icon name={t.icon} className={`w-[1.35rem] h-[1.35rem] transition-transform ${active ? "scale-110" : ""}`} strokeWidth={active ? 2.3 : 1.9} />
-                    {t.k === "jobs" && activeCount > 0 && (
-                      <span className="absolute -top-1 -right-2 min-w-4 h-4 px-0.5 rounded-full bg-sun text-[#33230a] text-[0.55rem] font-extrabold grid place-items-center">
-                        {activeCount}
-                      </span>
-                    )}
-                  </span>
+                  <Icon name={t.icon} className={`w-[1.35rem] h-[1.35rem] transition-transform ${active ? "scale-110" : ""}`} strokeWidth={active ? 2.3 : 1.9} />
                   <span className="text-[0.58rem] font-extrabold">{t.l}</span>
                 </button>
               );
