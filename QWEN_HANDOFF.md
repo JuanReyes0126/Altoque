@@ -83,23 +83,41 @@ ALTOQUE_TEST_DB=1 DATABASE_URL="<neon-preview>" BETTER_AUTH_SECRET="<32+>" \
 
 ---
 
-## 2. NEEDS TERMINAL VALIDATION
+## 5. EXACT NEXT STEPS FOR HUMAN/CHATGPT
 
-The following commands must be executed in local terminal:
-
+### Step 1: Reconcile Workspace with Real Repository
 ```bash
-# Typecheck (frontend + backend)
+# Compare workspace with real repository
+# Preserve/restore historical migrations from Git:
+# - 00000000000000_init
+# - 20260907192000_add_account_issuer
+
+# Keep current migration:
+# - 20260908120000_add_file_table
+
+# Compare package.json and package-lock.json with real repo
+```
+
+### Step 2: Review Git Changes
+```bash
+git diff
+git status --short
+```
+
+### Step 3: Install Dependencies (ONLY after reconciling package files)
+```bash
+npm ci
+```
+
+### Step 4: Generate Prisma Client
+```bash
+npx prisma generate
+```
+
+### Step 5: Typecheck
+```bash
 npm run typecheck
 npx tsc -p server/tsconfig.json --noEmit
-
-# Tests
-npx vitest run server/tests/unit.test.ts
-npx vitest run server/tests/security.test.ts
-npx vitest run server/tests/edge-dual.test.ts
-
-# Git
-git diff --check
-git status --short
 ```
 
 **Known TypeScript errors (require `npx prisma generate`):**
@@ -107,80 +125,99 @@ git status --short
 - `server/tests/auth.integration.test.ts`: Better Auth session types
 - `server/tests/claim.integration.test.ts`: PrismaClient type conversion
 
-**Required action:**
+### Step 6: Build
 ```bash
-npx prisma generate
+npm run build
 ```
 
----
-
-## 3. NEEDS REAL REPOSITORY RECONCILIATION
-
-### Migrations
-The workspace contains:
-```
-server/database/migrations/
-└── 20260908120000_add_file_table/migration.sql
-```
-
-**The real repository must also contain:**
-```
-├── 00000000000000_init/migration.sql
-└── 20260907192000_add_account_issuer/migration.sql
-```
-
-**Steps to apply in Neon Preview:**
+### Step 7: Git Diff Check
 ```bash
-# 1. Restore historical migrations from Git
-git show HEAD:server/database/migrations/00000000000000_init/migration.sql > server/database/migrations/00000000000000_init/migration.sql
-git show HEAD:server/database/migrations/20260907192000_add_account_issuer/migration.sql > server/database/migrations/20260907192000_add_account_issuer/migration.sql
+git diff --check
+```
 
-# 2. Apply all migrations
-export DIRECT_DATABASE_URL="postgresql://..."
-npx prisma migrate deploy
+### Step 8: Run Tests
+```bash
+# Unit tests (no DB required)
+npx vitest run server/tests/unit.test.ts
+npx vitest run server/tests/security.test.ts
+npx vitest run server/tests/edge-dual.test.ts
 
-# 3. Verify status
+# Integration tests (require DB)
+ALTOQUE_TEST_DB=1 \
+DATABASE_URL="<neon-preview-pooled>" \
+BETTER_AUTH_SECRET="<32+ chars>" \
+npx vitest run server/tests/
+```
+
+### Step 9: Configure Neon Preview Connection
+```bash
+# Configure environment variables
+export DATABASE_URL="postgresql://..."  # Neon pooled with ?pgbouncer=true
+export DIRECT_DATABASE_URL="postgresql://..."  # Neon direct (CLI only)
+export BETTER_AUTH_SECRET="<32+ chars>"
+export APP_URL="<Preview URL>"
+```
+
+### Step 10: Check Migration Status
+```bash
 npx prisma migrate status
-
-# 4. Execute seed
-npx tsx server/database/seeds/seed.ts
 ```
 
-### Package Files
-**EXTERNAL VALIDATION REQUIRED — COMPARE PACKAGE FILES WITH REAL REPOSITORY**
+### Step 11: Verify Active Job Index
+**EXTERNAL VALIDATION REQUIRED — VERIFY ACTIVE-JOB PARTIAL UNIQUE INDEX**
 
-This sandbox may not contain the canonical package.json/package-lock.json from the real repository. Before deployment:
-- Compare package.json with real repo
-- Compare package-lock.json with real repo
-- Run `npm ci` if differences exist
-- Verify no accidental version changes
+Verify that the following index exists in Neon Preview:
+```sql
+service_request_provider_active_unique
+```
 
----
+This index prevents a provider from having multiple active jobs simultaneously.
 
-## 4. NEEDS NEON PREVIEW
+### Step 12: Inspect Pending Migrations
+```bash
+npx prisma migrate status
+```
 
-### Configuration
-- [ ] Environment variables configured:
-  - `DATABASE_URL` (Neon pooled with `?pgbouncer=true`)
-  - `DIRECT_DATABASE_URL` (Neon direct, CLI only)
-  - `BETTER_AUTH_SECRET` (≥32 chars)
-  - `APP_URL` (Preview URL)
-  - `RESEND_API_KEY` (optional, for emails)
-  - `BLOB_READ_WRITE_TOKEN` (optional, for uploads)
-  - `BLOB_PRIVATE_READ_WRITE_TOKEN` (optional, for private uploads)
+Review which migrations are pending and verify they match expectations.
 
-### Migration Application
-- [ ] Restore historical migrations from Git
-- [ ] Apply migration 20260908120000_add_file_table
-- [ ] Verify table `file` exists
-- [ ] Execute seed
+### Step 13: Apply Migrations (CONDITIONAL / REQUIRES HUMAN APPROVAL)
+```bash
+# ONLY after human/ChatGPT review and approval
+npx prisma migrate deploy
+```
 
-### Verification
-- [ ] All tables created correctly
-- [ ] Indexes created
-- [ ] Foreign keys working
-- [ ] Seed data present (categories, zones)
-- [ ] Super admin created (if executed with credentials)
+**WARNING:** Do NOT execute this step automatically. This requires explicit human approval after reviewing migration status.
+
+### Step 14: Validate Vercel Preview
+- [ ] Landing loads correctly
+- [ ] User registration works
+- [ ] Verification email arrives (if Resend configured)
+- [ ] Login works
+- [ ] Create request works
+- [ ] "My requests" shows real data
+- [ ] Tracking updates in real time
+- [ ] Cancel request works
+- [ ] Photo upload works (after applying migration)
+- [ ] Provider panel shows active job
+- [ ] Admin panel shows real data (not mocks)
+- [ ] Create dispute works
+- [ ] Resolve dispute works
+- [ ] Toast notifications appear correctly
+
+### Step 15: Execute Manual E2E Tests
+- [ ] Customer: signup/login → create request → tracking → refresh
+- [ ] Provider: profile → availability → inbox → claim → active-job → transitions → completed
+- [ ] Customer: confirm → review → dispute (if applicable)
+- [ ] Admin: users → providers → approve/reject → requests → timeline → disputes → resolution → reports → audit
+
+### Step 16: Test Error Handling
+- [ ] 401 Unauthorized
+- [ ] 403 Forbidden
+- [ ] 404 Not Found
+- [ ] 409 Conflict
+- [ ] 422 Unprocessable Entity
+- [ ] 429 Too Many Requests
+- [ ] 500 Internal Server Error
 
 ---
 
