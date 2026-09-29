@@ -1,90 +1,85 @@
 # ALTOQUE · QWEN HANDOFF DOCUMENT
 
 **Date:** 2026
-**Workspace:** 26 (Final Audit Part 3)
-**Status:** Ready for external validation
+**Workspace:** 27 (Final Corrections)
+**Status:** 🟡 NOT READY FOR PREVIEW YET
 
 ---
 
-## 1. COMPLETED IN CODE
+## 1. FINAL STATUS BY PHASE
 
-### F2 - Client & Real Requests
-- ✅ All endpoints implemented: POST/GET/GET/:id/cancel/confirm/review
-- ✅ Frontend connected to real API with polling
-- ✅ Automatic state simulation removed
-- ✅ DB ↔ UI status mapping centralized
-- ✅ Photo upload with Vercel Blob (prepared)
-- ✅ Ownership validation on all endpoints
-- ✅ Dispute UI complete: modal + view
-- ✅ Toast notification system implemented
-- ✅ Double dispute UX corrected
+| Phase | Status | Justification |
+|-------|--------|---------------|
+| **F2** | ⚠️ IMPLEMENTED BUT UNVERIFIED | Endpoints implementados, frontend conectado, pero requiere validación con DB real |
+| **F3** | ⚠️ IMPLEMENTED BUT UNVERIFIED | Endpoints implementados, frontend conectado, pero requiere validación con DB real |
+| **F4** | ⚠️ IMPLEMENTED BUT UNVERIFIED | State machine implementada, pero requiere validación con DB real |
+| **F5** | 🟡 PARTIAL | Reviews ✅, Disputas ✅, Pagos ❌ (bloqueado por integración externa) |
+| **F6** | ⚠️ IMPLEMENTED BUT UNVERIFIED | Frontend admin completo, pero requiere validación con datos reales |
+| **F7** | ⚠️ IMPLEMENTED BUT UNVERIFIED | Seguridad implementada, pero requiere validación con tests reales |
+| **F8** | 🟡 PARTIAL | Documentación completa, requiere aplicar migraciones y configurar integraciones |
 
-### F3 - Real Providers
-- ✅ Provider profile (GET/PATCH/POST)
-- ✅ Availability management
-- ✅ Compatible requests inbox
-- ✅ Atomic claim with transaction
-- ✅ Job state transitions
-- ✅ Earnings statistics
-- ✅ Active-job endpoint implemented
-- ✅ ProApp frontend connected to real API
-- ✅ Provider dispute UI: ProDisputeModal + ProDisputeView
+---
 
-### F4 - Complete Service Cycle
-- ✅ Centralized state machine
-- ✅ State history in all transactions
-- ✅ Automatic notifications
-- ✅ Polling for synchronization (5s tracking, 10s lists)
-- ✅ UI reflects real database state
+## 2. MIGRATIONS PRESENT IN THIS WORKSPACE
 
-### F5 - Reviews, Disputes & Payments
-- ✅ **Reviews**: Complete with validations
-- ✅ **Disputes**: Backend complete + Frontend complete (client + provider + admin)
-- ⚠️ **Payments**: Architecture prepared (types, interfaces, placeholders)
-  - Does NOT process real payments
-  - Does NOT store card data
-  - Ready for future external provider integration
-  - PaymentStatusBadge and PaymentInfo components
-  - PaymentNotAvailableError for unavailable operations
+```
+server/database/migrations/
+└── 20260908120000_add_file_table/
+    └── migration.sql (43 lines)
+```
 
-### F6 - Administration & Operations
-- ✅ Dashboard with real metrics
-- ✅ User management (list, suspend, block)
-- ✅ Provider management (approve/reject)
-- ✅ Request consultation
-- ✅ Request timeline
-- ✅ Audit logs
-- ✅ Dispute resolution: Complete modal with form
-- ✅ Complete RBAC with permission matrix
-- ✅ Improved error handling: Toast notifications in all views
+### Missing Historical Migrations
+The real repository must contain:
+```
+├── 00000000000000_init/migration.sql
+└── 20260907192000_add_account_issuer/migration.sql
+```
 
-### F7 - Security, Concurrency & Hardening
-- ✅ Authentication with Better Auth (HttpOnly cookies)
-- ✅ Mandatory email verification
-- ✅ RBAC with permission matrix
-- ✅ Ownership validation on all sensitive endpoints
-- ✅ Input validation with Zod
-- ✅ Rate limiting on critical endpoints
-- ✅ Atomic transactions for critical operations
-- ✅ Unique constraint for active job per provider
-- ✅ Unique constraint for open dispute per request
-- ✅ CHECK constraints for ratings (1-5)
-- ✅ Centralized error handling
-- ✅ Security headers
-- ✅ Origin validation for CSRF
-- ✅ Log sanitization
+**IMPORTANT:** Do NOT recreate these migrations. Restore them from Git history.
 
-### F8 - Launch Preparation
-- ✅ Complete technical documentation
-- ✅ Environment variables documented
-- ✅ Versioned migrations in Git
-- ✅ Idempotent and safe seed
-- ✅ Health endpoint
-- ✅ Structured logging without secrets
-- ✅ Error handling with appropriate UX
-- ✅ Routing with refresh support
-- ✅ Optimized performance
-- ✅ Pre-production checklist
+---
+
+## 3. ACTIVE JOB INDEX
+
+**EXTERNAL VALIDATION REQUIRED — VERIFY ACTIVE-JOB PARTIAL UNIQUE INDEX**
+
+Name: `service_request_provider_active_unique`
+
+This index prevents a provider from having multiple active jobs simultaneously. It must be verified in Neon Preview before deployment.
+
+---
+
+## 4. TESTS STATUS
+
+### Tests Written
+- ✅ `server/tests/unit.test.ts` - Unit tests (RBAC, ULID, files, logs, pagination)
+- ✅ `server/tests/security.test.ts` - Security tests (Origin/CSRF, auth, healthz)
+- ✅ `server/tests/auth.integration.test.ts` - Authentication tests (requires DB)
+- ✅ `server/tests/claim.integration.test.ts` - Atomic claim tests (requires DB)
+- ✅ `server/tests/edge-dual.test.ts` - Vercel/Hono dual edge tests
+- ✅ `server/tests/disputes.test.ts` - Dispute tests (14 cases)
+- ✅ `server/tests/active-job.test.ts` - Active-job tests (4 cases)
+- ✅ `server/tests/request-ownership.test.ts` - Ownership tests (7 cases)
+- ✅ `server/tests/admin-rbac.test.ts` - Admin RBAC tests (7 cases)
+- ✅ `server/tests/providers-public.test.ts` - Public providers tests (12 cases)
+
+**Total: 73 tests written**
+
+### Tests Executed
+**NONE** - This environment cannot execute tests.
+
+### Tests Not Executed / Skipped
+All 73 tests require manual execution:
+```bash
+# Unit tests (no DB required)
+npx vitest run server/tests/unit.test.ts
+npx vitest run server/tests/security.test.ts
+npx vitest run server/tests/edge-dual.test.ts
+
+# Integration tests (require DB)
+ALTOQUE_TEST_DB=1 DATABASE_URL="<neon-preview>" BETTER_AUTH_SECRET="<32+>" \
+  npx vitest run server/tests/
+```
 
 ---
 
