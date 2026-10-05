@@ -60,8 +60,7 @@ export async function nextRequestCode(db: PrismaClient | Tx, year = new Date().g
   return `ALT-${year}-${String(n).padStart(6, "0")}`;
 }
 
-/** Código de referido para providers (6 chars, legible). */
+/** Código de referido para providers: 96 bits criptográficos, sin truncar. */
 export function referralCode(): string {
-  const bytes = randomBytes(4);
-  return ("AT-" + bytes.toString("hex").slice(0, 6)).toUpperCase();
+  return `AT-${randomBytes(12).toString("hex").toUpperCase()}`;
 }

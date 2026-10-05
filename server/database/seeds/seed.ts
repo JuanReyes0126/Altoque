@@ -11,6 +11,8 @@
  */
 import { PrismaClient } from "@prisma/client";
 import { hashPassword } from "better-auth/crypto";
+import { createLocalAccountIssuer } from "better-auth/db";
+import { ulid } from "../../lib/ids.js";
 
 const prisma = new PrismaClient();
 
@@ -87,15 +89,22 @@ async function main() {
     const existing = await prisma.user.findUnique({ where: { email } });
     if (!existing) {
       const hashed = await hashPassword(password);
+      const userId = ulid();
       const user = await prisma.user.create({
         data: {
+          id: userId,
           name: "Admin Altoque",
           email,
           emailVerified: true,
           role: "admin",
           status: "active",
           account: {
-            create: { accountId: email, providerId: "credential", password: hashed },
+            create: {
+              accountId: userId,
+              providerId: "credential",
+              issuer: createLocalAccountIssuer("credential"),
+              password: hashed,
+            },
           },
           admin_profile: { create: { admin_role: "super_admin" } },
         },

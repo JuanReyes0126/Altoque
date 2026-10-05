@@ -15,6 +15,7 @@ import { requireAuth, requireVerifiedEmail, type AuthEnv } from "../middleware/a
 import { ok, page, pageMeta, parsePaging } from "../lib/envelope.js";
 import { AppError } from "../lib/errors.js";
 import { ulid } from "../lib/ids.js";
+import { createWithReferralCode } from "../lib/referrals.js";
 import { consume, LIMITS } from "../lib/ratelimit.js";
 import { claimRequest } from "../requests/claimRequest.js";
 
@@ -69,8 +70,8 @@ providerRoutes.post("/me", requireAuth, requireVerifiedEmail, async (c) => {
     throw AppError.conflict("Ya tienes un perfil de proveedor");
   }
 
-  // Crear perfil en transacción
-  const provider = await prisma.$transaction(async (tx) => {
+  // Cada colisión de referido reintenta toda la operación en una transacción nueva.
+  const provider = await createWithReferralCode((code) => prisma.$transaction(async (tx) => {
     const newProvider = await tx.provider_profile.create({
       data: {
         id: ulid(),
@@ -79,7 +80,7 @@ providerRoutes.post("/me", requireAuth, requireVerifiedEmail, async (c) => {
         bio: data.bio || "",
         years_exp: data.years_exp || 0,
         verification_status: "pending_verification",
-        referral_code: `PRO-${ulid().slice(0, 8)}`,
+        referral_code: code,
       },
     });
 
@@ -101,7 +102,7 @@ providerRoutes.post("/me", requireAuth, requireVerifiedEmail, async (c) => {
     });
 
     return newProvider;
-  });
+  }));
 
   return c.json(ok(provider), 201);
 });

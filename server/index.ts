@@ -101,7 +101,6 @@ app.on(["GET", "POST"], "/api/v1/auth/*", async (c) => {
 app.route("/api/v1", healthRoutes);
 app.route("/api/v1", categoryRoutes);
 app.route("/api/v1", meRoutes);
-app.route("/api/v1", requestRoutes);
 
 // ── dominio F2 ──
 app.route("/api/v1/requests", requestRoutes);
