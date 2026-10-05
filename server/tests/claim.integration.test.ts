@@ -1,7 +1,7 @@
 /**
- * ALTOQUE · Transacción atómica del claim contra Neon DEV (F1.6)
+ * ALTOQUE · Transacción atómica del claim en una base exclusiva de tests
  *
- * Activación: ALTOQUE_TEST_DB=1 DATABASE_URL=<dev> BETTER_AUTH_SECRET=<32+> npx vitest run
+ * Activación únicamente mediante el runner de PostgreSQL aislado.
  *
  * Cobertura OBLIGATORIA (aprobada):
  *  - COMMIT:   request accepted + exactamente 1 history + exactamente 1 notification
@@ -17,34 +17,45 @@ import { AppError } from "../lib/errors";
 import { ulid } from "../lib/ids";
 import { HAS_DB } from "./setup";
 
-const d = describe.runIf(HAS_DB)("Claim atómico · integración (Neon dev)", () => {
-  const suffix = Date.now().toString(36);
+const d = describe.runIf(HAS_DB)("Claim atómico · integración aislada", () => {
+  const suffix = ulid();
   const catId = `test-cat-${suffix}`;
   const zoneId = `test-zone-${suffix}`;
   const userIds: string[] = [];
   const requestIds: string[] = [];
   const providerIds: string[] = [];
+  let categoryCreated = false;
+  let zoneCreated = false;
 
   beforeAll(async () => {
-    await prisma.category.upsert({
-      where: { id: catId },
-      update: {},
-      create: { id: catId, name: "Categoría Test", icon: "wrench", group_name: "Test", sort: 99 },
+    await prisma.category.create({
+      data: { id: catId, name: "Categoría Test", icon: "wrench", group_name: "Test", sort: 99 },
     });
-    await prisma.zone.upsert({
-      where: { id: zoneId },
-      update: {},
-      create: { id: zoneId, name: "Zona Test" },
+    categoryCreated = true;
+    await prisma.zone.create({
+      data: { id: zoneId, name: "Zona Test" },
     });
+    zoneCreated = true;
   });
 
   afterAll(async () => {
-    for (const id of requestIds) await prisma.service_request.deleteMany({ where: { id } });
-    for (const id of providerIds) await prisma.provider_profile.deleteMany({ where: { id } });
-    for (const id of userIds) await prisma.user.deleteMany({ where: { id } });
-    await prisma.category.deleteMany({ where: { id: catId } });
-    await prisma.zone.deleteMany({ where: { id: zoneId } });
-    await prisma.$disconnect();
+    try {
+      await prisma.$transaction(async (tx) => {
+        if (requestIds.length > 0) {
+          await tx.service_request.deleteMany({ where: { id: { in: requestIds } } });
+        }
+        if (providerIds.length > 0) {
+          await tx.provider_profile.deleteMany({ where: { id: { in: providerIds } } });
+        }
+        if (userIds.length > 0) {
+          await tx.user.deleteMany({ where: { id: { in: userIds } } });
+        }
+        if (categoryCreated) await tx.category.deleteMany({ where: { id: catId } });
+        if (zoneCreated) await tx.zone.deleteMany({ where: { id: zoneId } });
+      });
+    } finally {
+      await prisma.$disconnect();
+    }
   });
 
   async function makeCustomer() {
@@ -65,7 +76,7 @@ const d = describe.runIf(HAS_DB)("Claim atómico · integración (Neon dev)", ()
         id: ulid(),
         user_id: u.id,
         verification_status: "verified",
-        referral_code: `T-${ulid().slice(0, 8)}`,
+        referral_code: `T-${ulid()}`,
       },
     });
     providerIds.push(p.id);
@@ -144,7 +155,7 @@ const d = describe.runIf(HAS_DB)("Claim atómico · integración (Neon dev)", ()
               return fn(poisonedTx);
             });
         }
-        return (target as Record<PropertyKey, unknown>)[prop];
+        return (target as unknown as Record<PropertyKey, unknown>)[prop];
       },
     });
 
@@ -203,7 +214,7 @@ const d = describe.runIf(HAS_DB)("Claim atómico · integración (Neon dev)", ()
         id: ulid(),
         user_id: u.id,
         verification_status: "pending_verification",
-        referral_code: `T-${ulid().slice(0, 8)}`,
+        referral_code: `T-${ulid()}`,
         provider_service: { create: { category_id: catId, price_from: 800 } },
       },
     });
@@ -231,6 +242,41 @@ const d = describe.runIf(HAS_DB)("Claim atómico · integración (Neon dev)", ()
         claimRequestInTx(tx, { requestId: req.id, providerProfileId: pro.profile.id, actorUserId: pro.user.id, etaMin: 10 }),
       ),
     ).rejects.toMatchObject({ code: "REQUEST_ALREADY_CLAIMED" });
+  });
+
+  it("el índice parcial impide dos trabajos activos del mismo provider y revierte el segundo claim", async () => {
+    const customer = await makeCustomer();
+    const otherCustomer = await makeCustomer();
+    const pro = await makeVerifiedProvider();
+    const active = await makeSearchingRequest(customer.id);
+    const waiting = await makeSearchingRequest(otherCustomer.id);
+    await claimRequest(prisma, { requestId: active.id, providerUserId: pro.user.id, etaMin: 10 });
+
+    // Verificar cada estado incluido en el predicado del índice, no solo accepted.
+    for (const status of ["accepted", "on_the_way", "arrived", "in_progress"] as const) {
+      await prisma.service_request.update({ where: { id: active.id }, data: { status } });
+      await expect(claimRequest(prisma, {
+        requestId: waiting.id, providerUserId: pro.user.id, etaMin: 20,
+      })).rejects.toMatchObject({ code: "P2002" });
+      const unchanged = await prisma.service_request.findUniqueOrThrow({ where: { id: waiting.id } });
+      expect(unchanged.status).toBe("searching");
+      expect(unchanged.provider_id).toBeNull();
+      expect(unchanged.eta_min).toBeNull();
+      expect(await prisma.request_status_history.count({ where: { request_id: waiting.id } })).toBe(0);
+      expect(await prisma.notification.count({ where: { user_id: otherCustomer.id } })).toBe(0);
+      expect(await prisma.service_request.count({
+        where: { provider_id: pro.profile.id, status: { in: ["accepted", "on_the_way", "arrived", "in_progress"] } },
+      })).toBe(1);
+    }
+
+    // La restricción es parcial: al terminar el primero, el siguiente sí entra.
+    await prisma.service_request.update({ where: { id: active.id }, data: { status: "completed" } });
+    const next = await claimRequest(prisma, {
+      requestId: waiting.id, providerUserId: pro.user.id, etaMin: 20,
+    });
+    expect(next.status).toBe("accepted");
+    expect(await prisma.request_status_history.count({ where: { request_id: waiting.id } })).toBe(1);
+    expect(await prisma.notification.count({ where: { user_id: otherCustomer.id } })).toBe(1);
   });
 });
 

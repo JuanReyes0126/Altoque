@@ -1,158 +1,195 @@
-/**
- * ALTOQUE · Integración de autenticación contra Neon DEV (F1.6)
- *
- * Activación: ALTOQUE_TEST_DB=1 DATABASE_URL=<dev> BETTER_AUTH_SECRET=<32+> npx vitest run
- *
- * Cobertura pedida:
- *  - signup cannot choose admin / super_admin
- *  - cuenta no verificada no obtiene sesión (y no accede a protegidos)
- *  - expired session rejected
- *  - revoked session rejected
- *  - reset token cannot be reused
- *  - verification token expires
- *  - el comportamiento de sesión coincide con el esquema oficial de Better Auth
- */
-import { afterAll, describe, expect, it } from "vitest";
-import { auth } from "../auth/auth";
-import { prisma } from "../database/prisma";
-import { hashPassword } from "better-auth/crypto";
+/** Autenticación real de Better Auth sobre una base exclusiva de tests. */
+import { afterAll, describe, expect, it, vi } from "vitest";
+import { auth } from "../auth/auth.js";
+import { prisma } from "../database/prisma.js";
+import { ulid } from "../lib/ids.js";
 import { HAS_DB } from "./setup";
+import { testHeaders } from "./session-helpers.js";
 
-const d = describe.runIf(HAS_DB)("Auth · integración (Neon dev)", () => {
+// Capturamos los emails en memoria: no se envían ni se imprimen enlaces/tokens.
+const delivered = vi.hoisted(() => ({
+  verification: new Map<string, string>(),
+  reset: new Map<string, string>(),
+}));
+vi.mock("../auth/email.js", () => ({
+  verificationEmail: async ({ user, token }: { user: { email: string }; token: string }) => {
+    delivered.verification.set(user.email, token);
+  },
+  resetPasswordEmail: async ({ user, token }: { user: { email: string }; token: string }) => {
+    delivered.reset.set(user.email, token);
+  },
+}));
+
+describe.runIf(HAS_DB)("Auth · integración aislada", () => {
   const createdEmails: string[] = [];
+  const password = "Password123!";
 
   afterAll(async () => {
-    for (const email of createdEmails) {
-      const u = await prisma.user.findUnique({ where: { email } });
-      if (u) await prisma.user.delete({ where: { id: u.id } }); // cascada limpia sesiones/cuentas
+    try {
+      // verification no tiene FK: limpiar resets pendientes si un test falla.
+      const context = await auth.$context;
+      for (const token of delivered.reset.values()) {
+        await context.internalAdapter.deleteVerificationByIdentifier(`reset-password:${token}`);
+      }
+      if (createdEmails.length > 0) {
+        await prisma.user.deleteMany({ where: { email: { in: createdEmails } } });
+      }
+    } finally {
+      delivered.verification.clear();
+      delivered.reset.clear();
+      await prisma.$disconnect();
     }
-    await prisma.$disconnect();
   });
 
-  const uniqueEmail = (tag: string) => {
-    const email = `${tag}-${Date.now()}-${Math.floor(Math.random() * 1e6)}@test.altoque.do`;
+  function uniqueEmail(tag: string) {
+    const email = `${tag}-${ulid()}@test.altoque.do`.toLowerCase();
     createdEmails.push(email);
     return email;
-  };
+  }
 
-  it("signup con role:'admin' en el body NO crea admin (input:false)", async () => {
-    const email = uniqueEmail("admin-esc");
-    const res = await auth.api.signUpEmail({
-      body: { name: "Escalada", email, password: "Password123!", role: "admin" } as never,
+  function deliveredToken(kind: "verification" | "reset", email: string) {
+    const token = delivered[kind].get(email);
+    if (!token) throw new Error(`No se recibió el email de ${kind}`);
+    return token;
+  }
+
+  async function expectAuthFailure(action: Promise<unknown>, expectedCode: string) {
+    let rejected = false;
+    let code: unknown;
+    try {
+      await action;
+    } catch (error) {
+      rejected = true;
+      code = (error as { body?: { code?: unknown } }).body?.code;
+    }
+    // Afirmar solo booleanos/códigos evita mostrar sesiones o tokens si falla.
+    expect(rejected).toBe(true);
+    expect(code).toBe(expectedCode);
+  }
+
+  async function emittedCookie(headers: Headers) {
+    const { authCookies } = await auth.$context;
+    const cookie = headers.getSetCookie().find((value) =>
+      value.startsWith(`${authCookies.sessionToken.name}=`),
+    );
+    if (!cookie) throw new Error("Better Auth no emitió una cookie de sesión");
+    return cookie.split(";")[0];
+  }
+
+  async function signupAndVerify(tag: string) {
+    const email = uniqueEmail(tag);
+    const signup = await auth.api.signUpEmail({ body: { name: tag, email, password } });
+    expect(signup.token === null).toBe(true);
+    const verified = await auth.api.verifyEmail({
+      query: { token: deliveredToken("verification", email) },
     });
-    const user = await prisma.user.findUnique({ where: { email } });
-    expect(user).not.toBeNull();
-    expect(user!.role).toBe("customer"); // el servidor ignoró el campo
-    expect(res.user.role as string).not.toBe("admin");
+    if (!verified) throw new Error("La verificación no devolvió un resultado");
+    expect(verified.status).toBe(true);
+    const user = await prisma.user.findUniqueOrThrow({ where: { email } });
+    expect(user.emailVerified).toBe(true);
+    return { email, user };
+  }
+
+  async function login(email: string, loginPassword = password) {
+    const result = await auth.api.signInEmail({
+      body: { email, password: loginPassword },
+      returnHeaders: true,
+    });
+    const cookie = await emittedCookie(result.headers);
+    const session = await auth.api.getSession({ headers: new Headers(testHeaders(cookie)) });
+    if (!session) throw new Error("La cookie emitida no autentica una sesión válida");
+    return { cookie, session };
+  }
+
+  it("signup con role:'admin' en el body NO crea admin", async () => {
+    const email = uniqueEmail("admin-esc");
+    const result = await auth.api.signUpEmail({
+      body: { name: "Escalada", email, password, role: "admin" } as never,
+    });
+    const user = await prisma.user.findUniqueOrThrow({ where: { email } });
+    expect(user.role).toBe("customer");
+    expect(result.user.role).toBe("customer");
   });
 
   it("signup con role:'super_admin' tampoco", async () => {
     const email = uniqueEmail("super-esc");
     await auth.api.signUpEmail({
-      body: { name: "Super Escalada", email, password: "Password123!", role: "super_admin" } as never,
+      body: { name: "Super Escalada", email, password, role: "super_admin" } as never,
     });
-    const user = await prisma.user.findUnique({ where: { email } });
-    expect(user!.role).toBe("customer");
+    const user = await prisma.user.findUniqueOrThrow({ where: { email } });
+    expect(user.role).toBe("customer");
   });
 
-  it("cuenta no verificada NO obtiene sesión al registrarse", async () => {
+  it("cuenta no verificada no obtiene sesión al registrarse ni al iniciar sesión", async () => {
     const email = uniqueEmail("unver");
-    const res = await auth.api.signUpEmail({
-      body: { name: "No Verificado", email, password: "Password123!" },
+    const result = await auth.api.signUpEmail({
+      body: { name: "No Verificado", email, password },
+      returnHeaders: true,
     });
-    // requireEmailVerification: la respuesta NO incluye sesión válida.
-    expect((res as { token?: string }).token).toBeTruthy(); // token de verificación
-    expect((res as { session?: unknown }).session).toBeFalsy();
-
-    // e intentar login antes de verificar también falla
-    await expect(
-      auth.api.signInEmail({ body: { email, password: "Password123!" } }),
-    ).rejects.toBeTruthy();
+    expect(result.response.token === null).toBe(true);
+    expect(await prisma.session.count({ where: { userId: result.response.user.id } })).toBe(0);
+    const { authCookies } = await auth.$context;
+    expect(result.headers.getSetCookie().some((cookie) =>
+      cookie.startsWith(`${authCookies.sessionToken.name}=`),
+    )).toBe(false);
+    await expectAuthFailure(auth.api.signInEmail({ body: { email, password } }), "EMAIL_NOT_VERIFIED");
+    expect(await prisma.session.count({ where: { userId: result.response.user.id } })).toBe(0);
   });
 
-  it("expired session → rechazada", async () => {
-    const email = uniqueEmail("expire");
-    await prisma.user.create({
-      data: {
-        name: "Expira", email, emailVerified: true, role: "customer",
-        account: { create: { accountId: email, providerId: "credential", password: await hashPassword("Password123!") } },
-      },
-    });
-    const res = await auth.api.signInEmail({ body: { email, password: "Password123!" } });
-    expect(res.session).toBeTruthy();
-
-    // expirar la sesión directamente en BD (fuente de verdad)
+  it("una sesión inicialmente válida es rechazada después de expirar", async () => {
+    const { email, user } = await signupAndVerify("expire");
+    const { cookie, session } = await login(email);
+    expect(session.user.id).toBe(user.id);
     await prisma.session.update({
-      where: { id: res.session.id },
+      where: { id: session.session.id },
       data: { expiresAt: new Date(Date.now() - 60_000) },
     });
-
-    const cookie = `better-auth.session_token=${res.session.token}`;
-    const session = await auth.api.getSession({ headers: new Headers({ cookie }) });
-    expect(session).toBeNull(); // sesión expirada rechazada
+    const expired = await auth.api.getSession({ headers: new Headers(testHeaders(cookie)) });
+    expect(expired === null).toBe(true);
   });
 
-  it("revoked session (logout) → rechazada", async () => {
-    const email = uniqueEmail("revoke");
-    await prisma.user.create({
-      data: {
-        name: "Revoca", email, emailVerified: true, role: "customer",
-        account: { create: { accountId: email, providerId: "credential", password: await hashPassword("Password123!") } },
-      },
-    });
-    const res = await auth.api.signInEmail({ body: { email, password: "Password123!" } });
-    const cookie = `better-auth.session_token=${res.session.token}`;
-
-    await auth.api.signOut({ headers: new Headers({ cookie }) });
-
-    const session = await auth.api.getSession({ headers: new Headers({ cookie }) });
-    expect(session).toBeNull(); // sesión revocada rechazada
+  it("logout elimina una sesión inicialmente válida y la cookie deja de autenticar", async () => {
+    const { email, user } = await signupAndVerify("revoke");
+    const { cookie, session } = await login(email);
+    expect(session.user.id).toBe(user.id);
+    const result = await auth.api.signOut({ headers: new Headers(testHeaders(cookie)) });
+    expect(result.success).toBe(true);
+    expect(await prisma.session.count({ where: { id: session.session.id } })).toBe(0);
+    const revoked = await auth.api.getSession({ headers: new Headers(testHeaders(cookie)) });
+    expect(revoked === null).toBe(true);
   });
 
-  it("verification token expirado → rechazado", async () => {
+  it("el JWT enviado por email se rechaza después de su vencimiento", async () => {
     const email = uniqueEmail("vexp");
-    const res = await auth.api.signUpEmail({
-      body: { name: "V Exp", email, password: "Password123!" },
-    });
-    const token = (res as { token?: string }).token;
-    expect(token).toBeTruthy();
-
-    // expirar todos los tokens de verificación del usuario
-    await prisma.verification.updateMany({
-      where: { identifier: { contains: email } },
-      data: { expiresAt: new Date(Date.now() - 60_000) },
-    });
-
-    await expect(auth.api.verifyEmail({ query: { token: token! } })).rejects.toBeTruthy();
-
-    const user = await prisma.user.findUnique({ where: { email } });
-    expect(user!.emailVerified).toBe(false);
+    await auth.api.signUpEmail({ body: { name: "V Exp", email, password } });
+    const token = deliveredToken("verification", email);
+    // Altoque no sobreescribe expiresIn; Better Auth usa 3600 segundos.
+    const future = Date.now() + (3600 + 60) * 1000;
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(future);
+      await expectAuthFailure(auth.api.verifyEmail({ query: { token } }), "TOKEN_EXPIRED");
+    } finally {
+      vi.useRealTimers();
+    }
+    const user = await prisma.user.findUniqueOrThrow({ where: { email } });
+    expect(user.emailVerified).toBe(false);
+    expect(await prisma.session.count({ where: { userId: user.id } })).toBe(0);
   });
 
-  it("reset token de un solo uso: el segundo intento falla", async () => {
-    const email = uniqueEmail("reset");
-    await prisma.user.create({
-      data: {
-        name: "Reset", email, emailVerified: true, role: "customer",
-        account: { create: { accountId: email, providerId: "credential", password: await hashPassword("Password123!") } },
-      },
+  it("reset token de un solo uso: segundo intento falla y la contraseña nueva funciona", async () => {
+    const { email } = await signupAndVerify("reset");
+    const requested = await auth.api.requestPasswordReset({
+      body: { email, redirectTo: "http://localhost:3000/reset" },
     });
-    const res = await auth.api.requestPasswordReset({ body: { email, redirectTo: "http://localhost:3000/reset" } });
-    const token = (res as { token?: string } | null)?.token;
-    expect(token).toBeTruthy();
-
-    await auth.api.resetPassword({ body: { token: token!, newPassword: "NewPassword123!" } });
-
-    // reutilizar el mismo token debe fallar
-    await expect(
-      auth.api.resetPassword({ body: { token: token!, newPassword: "OtherPassword123!" } }),
-    ).rejects.toBeTruthy();
-
-    // y la contraseña nueva es la vigente
-    const ok = await auth.api.signInEmail({ body: { email, password: "NewPassword123!" } });
-    expect(ok.session).toBeTruthy();
+    expect(requested.status).toBe(true);
+    const token = deliveredToken("reset", email);
+    const reset = await auth.api.resetPassword({ body: { token, newPassword: "NewPassword123!" } });
+    expect(reset.status).toBe(true);
+    await expectAuthFailure(
+      auth.api.resetPassword({ body: { token, newPassword: "OtherPassword123!" } }), "INVALID_TOKEN",
+    );
+    await login(email, "NewPassword123!");
+    await expectAuthFailure(auth.api.signInEmail({ body: { email, password } }), "INVALID_EMAIL_OR_PASSWORD");
   });
 });
-
-// referencia para evitar tree-shaking del describe condicional
-void d;

@@ -1,0 +1,2 @@
+# Provider used by the reviewed migration history.
+provider = "postgresql"

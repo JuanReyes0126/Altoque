@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:offline": "node scripts/run-tests.mjs offline",
+    "test:integration": "node scripts/run-tests.mjs integration"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.1.0",
@@ -39,6 +41,8 @@
     "@types/react-dom": "^18.2.0",
     "@types/uuid": "^9.0.7",
     "@vitejs/plugin-react": "^4.3.4",
+    "dotenv": "16.6.1",
+    "embedded-postgres": "17.10.0-beta.17",
     "tailwindcss": "^4.1.7",
     "typescript": "^5.7.0",
     "vite": "^6.3.5"

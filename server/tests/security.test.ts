@@ -17,7 +17,7 @@ const TRUSTED = "http://localhost:3000";
 
 describe("Protección de Origen (CSRF)", () => {
   it("rechaza mutables desde un Origen externo", async () => {
-    const res = await app.request("/api/v1/auth/sign-up", {
+    const res = await app.request("/api/v1/auth/sign-up/email", {
       method: "POST",
       headers: { "content-type": "application/json", origin: "https://evil.example.com" },
       body: JSON.stringify({ name: "X", email: "x@x.do", password: "password123" }),
@@ -28,14 +28,14 @@ describe("Protección de Origen (CSRF)", () => {
   });
 
   it("acepta mutables desde el Origen confiable (no 403 de origen)", async () => {
-    const res = await app.request("/api/v1/auth/sign-up", {
+    const res = await app.request("/api/v1/auth/sign-up/email", {
       method: "POST",
       headers: { "content-type": "application/json", origin: TRUSTED },
       body: JSON.stringify({}),
     });
-    // Con BD dummy la llamada falla aguas abajo (500/4xx de BA), pero
-    // NO debe ser el 403 de la validación de Origen.
-    expect(res.status).not.toBe(403);
+    // La ruta real de Better Auth valida el cuerpo antes de consultar BD.
+    // Un 404 también ocultaría un error de montaje, por eso exigir 400.
+    expect(res.status).toBe(400);
   });
 
   it("los GET no exigen Origen", async () => {

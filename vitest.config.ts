@@ -4,8 +4,8 @@
  *
  *   npx vitest run
  *
- * Los tests de integración requieren DATABASE_URL (rama DEV de Neon);
- * sin ella se omiten automáticamente (describe.runIf).
+ * npm run test:integration crea PostgreSQL local aislado por ejecución.
+ * Sin ese runner se ejecutan solo los tests offline.
  */
 import { defineConfig } from "vitest/config";
 
@@ -17,6 +17,6 @@ export default defineConfig({
     testTimeout: 30_000,
     hookTimeout: 60_000,
     pool: "forks",
-    fileParallelism: false, // la BD de dev es compartida: serializa suites
+    fileParallelism: false, // suites seriales para comprobar cleanup y fixtures
   },
 });

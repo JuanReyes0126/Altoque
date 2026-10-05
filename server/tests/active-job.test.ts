@@ -1,168 +1,128 @@
-/**
- * ALTOQUE · Tests de active-job (F3)
- * 
- * Tests para endpoint GET /api/v1/provider/active-job
- * 
- * TEST WRITTEN / NOT EXECUTED (requiere DB real)
- */
+/** Tests HTTP del trabajo activo con fixtures propias y limpieza acotada. */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { app } from "../index.js";
 import { prisma } from "../database/prisma.js";
 import { ulid } from "../lib/ids.js";
+import { HAS_DB } from "./setup";
+import { createTestCookie, testHeaders } from "./session-helpers.js";
 
-describe("Provider Active Job API", () => {
-  let providerToken: string;
-  let customerToken: string;
-  let providerId: string;
-  let customerId: string;
+describe.runIf(HAS_DB)("Provider Active Job API", () => {
+  const userIds: string[] = [];
+  const providerIds: string[] = [];
+  const requestIds: string[] = [];
+  const categoryIds: string[] = [];
+  const zoneIds: string[] = [];
+  let providerCookie: string;
+  let idleProviderCookie: string;
+  let customerCookie: string;
+  let providerProfileId: string;
   let activeJobId: string;
 
-  beforeAll(async () => {
-    // Crear proveedor
-    const providerUser = await prisma.user.create({
+  async function createUser(name: string) {
+    const user = await prisma.user.create({
       data: {
         id: ulid(),
-        name: "Test Provider",
-        email: `provider-active-${Date.now()}@test.com`,
+        name,
+        email: `active-job-${ulid()}@test.com`,
         role: "customer",
         status: "active",
         emailVerified: true,
       },
     });
-    providerId = providerUser.id;
+    userIds.push(user.id);
+    return user;
+  }
 
-    await prisma.provider_profile.create({
+  async function createProvider(userId: string) {
+    const provider = await prisma.provider_profile.create({
       data: {
         id: ulid(),
-        user_id: providerId,
+        user_id: userId,
         verification_status: "verified",
         is_available: true,
-        referral_code: `ACTIVE-${Date.now()}`,
+        referral_code: `ACTIVE-${ulid()}`,
       },
     });
+    providerIds.push(provider.id);
+    return provider;
+  }
 
-    // Crear cliente
-    const customer = await prisma.user.create({
+  beforeAll(async () => {
+    const category = await prisma.category.create({
+      data: { id: ulid(), name: "Active job category", icon: "wrench", group_name: "Test" },
+    });
+    categoryIds.push(category.id);
+    const zone = await prisma.zone.create({ data: { id: ulid(), name: "Active job zone" } });
+    zoneIds.push(zone.id);
+    const providerUser = await createUser("Active Provider");
+    const provider = await createProvider(providerUser.id);
+    providerProfileId = provider.id;
+    const idleProvider = await createUser("Idle Provider");
+    await createProvider(idleProvider.id);
+    const customer = await createUser("Active Job Customer");
+    const job = await prisma.service_request.create({
       data: {
         id: ulid(),
-        name: "Test Customer",
-        email: `customer-active-${Date.now()}@test.com`,
-        role: "customer",
-        status: "active",
-        emailVerified: true,
-      },
-    });
-    customerId = customer.id;
-
-    // Crear trabajo activo
-    const category = await prisma.category.findFirst();
-    const zone = await prisma.zone.findFirst();
-
-    activeJobId = ulid();
-    await prisma.service_request.create({
-      data: {
-        id: activeJobId,
-        code: `ALT-ACTIVE-${Date.now()}`,
-        customer_id: customerId,
-        category_id: category!.id,
-        zone_id: zone!.id,
+        code: `ALT-ACTIVE-${ulid()}`,
+        customer_id: customer.id,
+        category_id: category.id,
+        zone_id: zone.id,
         description: "Active job test",
         when_type: "now",
         status: "on_the_way",
-        provider_id: providerId,
+        provider_id: provider.id,
         eta_min: 15,
       },
     });
-
-    providerToken = await createTestSession(providerId);
-    customerToken = await createTestSession(customerId);
+    requestIds.push(job.id);
+    activeJobId = job.id;
+    providerCookie = await createTestCookie(providerUser.id);
+    idleProviderCookie = await createTestCookie(idleProvider.id);
+    customerCookie = await createTestCookie(customer.id);
   });
 
   afterAll(async () => {
-    await prisma.service_request.deleteMany({ where: { id: activeJobId } });
-    await prisma.provider_profile.deleteMany({ where: { user_id: providerId } });
-    await prisma.user.deleteMany({ where: { id: { in: [providerId, customerId] } } });
+    await prisma.service_request.deleteMany({ where: { id: { in: requestIds } } });
+    await prisma.notification.deleteMany({ where: { user_id: { in: userIds } } });
+    await prisma.admin_audit_log.deleteMany({ where: { actor_id: { in: userIds } } });
+    await prisma.provider_profile.deleteMany({ where: { id: { in: providerIds } } });
+    await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
+    await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+    await prisma.category.deleteMany({ where: { id: { in: categoryIds } } });
+    await prisma.zone.deleteMany({ where: { id: { in: zoneIds } } });
   });
 
   it("provider sin active job recibe null", async () => {
-    const otherProvider = await prisma.user.create({
-      data: {
-        id: ulid(),
-        name: "Other Provider",
-        email: `other-${Date.now()}@test.com`,
-        role: "customer",
-        status: "active",
-        emailVerified: true,
-      },
-    });
-
-    await prisma.provider_profile.create({
-      data: {
-        id: ulid(),
-        user_id: otherProvider.id,
-        verification_status: "verified",
-        is_available: true,
-        referral_code: `OTHER-${Date.now()}`,
-      },
-    });
-
-    const otherToken = await createTestSession(otherProvider.id);
-
     const res = await app.request("/api/v1/provider/active-job", {
-      method: "GET",
-      headers: { Cookie: `session=${otherToken}` },
+      headers: testHeaders(idleProviderCookie),
     });
-
     expect(res.status).toBe(200);
-    const data = await res.json();
-    expect(data.data.job).toBeNull();
-
-    await prisma.provider_profile.deleteMany({ where: { user_id: otherProvider.id } });
-    await prisma.user.delete({ where: { id: otherProvider.id } });
+    expect((await res.json()).data.job).toBeNull();
   });
 
   it("provider con active job recibe el trabajo correcto", async () => {
     const res = await app.request("/api/v1/provider/active-job", {
-      method: "GET",
-      headers: { Cookie: `session=${providerToken}` },
+      headers: testHeaders(providerCookie),
     });
-
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.data.job).toBeDefined();
     expect(data.data.job.id).toBe(activeJobId);
     expect(data.data.job.status).toBe("on_the_way");
   });
 
-  it("customer no puede usar endpoint provider", async () => {
+  it("customer sin perfil provider recibe 404", async () => {
     const res = await app.request("/api/v1/provider/active-job", {
-      method: "GET",
-      headers: { Cookie: `session=${customerToken}` },
+      headers: testHeaders(customerCookie),
     });
-
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("NOT_FOUND");
   });
 
-  it("active job pertenece al provider correcto", async () => {
+  it("active job pertenece al perfil del provider correcto", async () => {
     const res = await app.request("/api/v1/provider/active-job", {
-      method: "GET",
-      headers: { Cookie: `session=${providerToken}` },
+      headers: testHeaders(providerCookie),
     });
-
-    const data = await res.json();
-    expect(data.data.job.provider_id).toBe(providerId);
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.job.provider_id).toBe(providerProfileId);
   });
 });
-
-async function createTestSession(userId: string): Promise<string> {
-  const token = `test-session-${userId}-${Date.now()}`;
-  await prisma.session.create({
-    data: {
-      id: ulid(),
-      token,
-      userId,
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-    },
-  });
-  return token;
-}

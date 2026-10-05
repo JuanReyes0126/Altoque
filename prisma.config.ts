@@ -6,14 +6,18 @@
  * definida en el datasource del schema. Production NUNCA se usa para
  * desarrollo: cada entorno apunta a su propia rama/base de Neon.
  *
- * El CLI de Prisma carga .env automáticamente antes de evaluar esta
- * configuración; en CI/producción las variables provienen del entorno.
+ * Con prisma.config.ts, Prisma 6 omite la carga automática de .env.
+ * dotenv lo carga explícitamente sin reemplazar variables ya exportadas.
  */
+import "dotenv/config";
 import { defineConfig } from "prisma/config";
 
 export default defineConfig({
   schema: "server/database/schema.prisma",
+  migrations: {
+    path: "server/database/migrations",
+  },
   datasource: {
-    url: process.env.DIRECT_DATABASE_URL ?? process.env.DATABASE_URL ?? "",
+    url: process.env.DIRECT_DATABASE_URL ?? "",
   },
 });

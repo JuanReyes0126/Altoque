@@ -1,548 +1,325 @@
 /**
  * ALTOQUE · Tests de disputas (F5)
- * 
- * Tests para endpoints de disputas:
- * - Creación por cliente/proveedor
- * - Ownership y permisos
- * - Estados válidos
- * - Resolución admin
- * - Duplicados
- * 
- * TEST WRITTEN / NOT EXECUTED (requiere DB real)
+ *
+ * Integración con fixtures propias. Cada escenario crea su solicitud;
+ * ejecutar únicamente en una base de test separada y desechable.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import type { DisputeStatus, RequestStatus, UserRole } from "@prisma/client";
 import { app } from "../index.js";
 import { prisma } from "../database/prisma.js";
 import { ulid } from "../lib/ids.js";
+import { HAS_DB } from "./setup";
+import { createTestCookie, testHeaders } from "./session-helpers.js";
 
-describe("Disputes API", () => {
-  let customerToken: string;
-  let providerToken: string;
-  let adminToken: string;
+describe.runIf(HAS_DB)("Disputes API", () => {
+  const fixturePrefix = `disputes-${ulid()}`;
+  const userIds: string[] = [];
+  const providerProfileIds: string[] = [];
+  const requestIds: string[] = [];
+  const disputeIds: string[] = [];
+  const categoryIds: string[] = [];
+  const zoneIds: string[] = [];
+  let customerCookie: string;
+  let providerCookie: string;
+  let adminCookie: string;
   let customerId: string;
-  let providerId: string;
+  let providerUserId: string;
+  let providerProfileId: string;
   let adminId: string;
-  let requestId: string;
-  let completedRequestId: string;
+  let categoryId: string;
+  let zoneId: string;
 
-  beforeAll(async () => {
-    // Crear usuarios de prueba
-    const customer = await prisma.user.create({
+  async function createUser(name: string, role: UserRole = "customer") {
+    const user = await prisma.user.create({
       data: {
         id: ulid(),
-        name: "Test Customer",
-        email: `customer-${Date.now()}@test.com`,
-        role: "customer",
+        name,
+        email: `${fixturePrefix}-${ulid()}@test.invalid`,
+        role,
         status: "active",
         emailVerified: true,
       },
     });
-    customerId = customer.id;
+    userIds.push(user.id);
+    return user;
+  }
 
-    const providerUser = await prisma.user.create({
+  async function createProviderProfile(userId: string) {
+    const provider = await prisma.provider_profile.create({
       data: {
         id: ulid(),
-        name: "Test Provider",
-        email: `provider-${Date.now()}@test.com`,
-        role: "customer",
-        status: "active",
-        emailVerified: true,
-      },
-    });
-    providerId = providerUser.id;
-
-    const admin = await prisma.user.create({
-      data: {
-        id: ulid(),
-        name: "Test Admin",
-        email: `admin-${Date.now()}@test.com`,
-        role: "admin",
-        status: "active",
-        emailVerified: true,
-      },
-    });
-    adminId = admin.id;
-
-    // Crear perfil de proveedor
-    await prisma.provider_profile.create({
-      data: {
-        id: ulid(),
-        user_id: providerId,
+        user_id: userId,
         verification_status: "verified",
         is_available: true,
-        referral_code: `TEST-${Date.now()}`,
+        referral_code: `${fixturePrefix}-${ulid()}`,
       },
     });
+    providerProfileIds.push(provider.id);
+    return provider;
+  }
 
-    // Crear perfil admin
-    await prisma.admin_profile.create({
-      data: {
-        user_id: adminId,
-        admin_role: "admin",
-      },
-    });
-
-    // Crear solicitud de prueba (searching)
-    const category = await prisma.category.findFirst();
-    const zone = await prisma.zone.findFirst();
-
-    if (!category || !zone) {
-      throw new Error("No hay categorías o zonas en la base de datos");
-    }
-
-    requestId = await createTestRequest(customerId, category.id, zone.id, "searching");
-    completedRequestId = await createTestRequest(customerId, category.id, zone.id, "completed", providerId);
-
-    // Generar tokens de sesión (mock para tests)
-    customerToken = await createTestSession(customerId);
-    providerToken = await createTestSession(providerId);
-    adminToken = await createTestSession(adminId);
-  });
-
-  afterAll(async () => {
-    // Limpiar datos de prueba
-    await prisma.dispute.deleteMany({
-      where: {
-        OR: [
-          { opened_by: customerId },
-          { opened_by: providerId },
-          { resolved_by: adminId },
-        ],
-      },
-    });
-    await prisma.service_request.deleteMany({
-      where: { id: { in: [requestId, completedRequestId] } },
-    });
-    await prisma.admin_profile.deleteMany({ where: { user_id: adminId } });
-    await prisma.provider_profile.deleteMany({ where: { user_id: providerId } });
-    await prisma.user.deleteMany({
-      where: { id: { in: [customerId, providerId, adminId] } },
-    });
-  });
-
-  // A. Customer puede crear disputa sobre request propio elegible
-  it("A. customer puede crear disputa sobre request completado propio", async () => {
-    const res = await app.request("/api/v1/disputes", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: `session=${customerToken}`,
-      },
-      body: JSON.stringify({
-        request_id: completedRequestId,
-        reason: "El servicio no fue completado correctamente",
-      }),
-    });
-
-    expect(res.status).toBe(201);
-    const data = await res.json();
-    expect(data.data).toBeDefined();
-    expect(data.data.request_id).toBe(completedRequestId);
-    expect(data.data.status).toBe("open");
-  });
-
-  // B. Customer NO puede crear disputa sobre request ajeno
-  it("B. customer NO puede crear disputa sobre request ajeno", async () => {
-    const otherCustomer = await prisma.user.create({
+  async function createRequest(
+    status: RequestStatus = "completed",
+    customerUserId = customerId,
+    assignedProviderId: string | null = providerProfileId,
+  ) {
+    const request = await prisma.service_request.create({
       data: {
         id: ulid(),
-        name: "Other Customer",
-        email: `other-${Date.now()}@test.com`,
-        role: "customer",
-        status: "active",
-        emailVerified: true,
+        code: `ALT-TEST-${ulid()}`,
+        customer_id: customerUserId,
+        category_id: categoryId,
+        zone_id: zoneId,
+        description: "Solicitud propia de la suite de disputas",
+        when_type: "now",
+        status,
+        provider_id: assignedProviderId,
       },
     });
+    requestIds.push(request.id);
+    return request;
+  }
 
-    const category = await prisma.category.findFirst();
-    const zone = await prisma.zone.findFirst();
-    const otherRequestId = await createTestRequest(otherCustomer.id, category!.id, zone!.id, "completed");
-
-    const res = await app.request("/api/v1/disputes", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: `session=${customerToken}`,
-      },
-      body: JSON.stringify({
-        request_id: otherRequestId,
-        reason: "Intentando disputar request ajeno",
-      }),
-    });
-
-    expect(res.status).toBe(403);
-
-    // Cleanup
-    await prisma.service_request.delete({ where: { id: otherRequestId } });
-    await prisma.user.delete({ where: { id: otherCustomer.id } });
-  });
-
-  // C. Provider asignado puede crear disputa
-  it("C. provider asignado puede crear disputa sobre request completado", async () => {
-    const res = await app.request("/api/v1/disputes", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: `session=${providerToken}`,
-      },
-      body: JSON.stringify({
-        request_id: completedRequestId,
-        reason: "El cliente no pagó el servicio completado",
-      }),
-    });
-
-    expect(res.status).toBe(201);
-    const data = await res.json();
-    expect(data.data.opened_by).toBe(providerId);
-  });
-
-  // D. Provider ajeno NO puede crear disputa
-  it("D. provider ajeno NO puede crear disputa", async () => {
-    const otherProvider = await prisma.user.create({
-      data: {
-        id: ulid(),
-        name: "Other Provider",
-        email: `other-provider-${Date.now()}@test.com`,
-        role: "customer",
-        status: "active",
-        emailVerified: true,
-      },
-    });
-
-    await prisma.provider_profile.create({
-      data: {
-        id: ulid(),
-        user_id: otherProvider.id,
-        verification_status: "verified",
-        is_available: true,
-        referral_code: `OTHER-${Date.now()}`,
-      },
-    });
-
-    const otherProviderToken = await createTestSession(otherProvider.id);
-
-    const res = await app.request("/api/v1/disputes", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: `session=${otherProviderToken}`,
-      },
-      body: JSON.stringify({
-        request_id: completedRequestId,
-        reason: "Provider ajeno intentando disputar",
-      }),
-    });
-
-    expect(res.status).toBe(403);
-
-    // Cleanup
-    await prisma.provider_profile.deleteMany({ where: { user_id: otherProvider.id } });
-    await prisma.user.delete({ where: { id: otherProvider.id } });
-  });
-
-  // E. Usuario no relacionado NO puede leer disputa
-  it("E. usuario no relacionado NO puede leer disputa", async () => {
-    const dispute = await prisma.dispute.findFirst({
-      where: { request_id: completedRequestId },
-    });
-
-    if (!dispute) {
-      throw new Error("No se creó la disputa en tests anteriores");
-    }
-
-    const unrelatedUser = await prisma.user.create({
-      data: {
-        id: ulid(),
-        name: "Unrelated User",
-        email: `unrelated-${Date.now()}@test.com`,
-        role: "customer",
-        status: "active",
-        emailVerified: true,
-      },
-    });
-
-    const unrelatedToken = await createTestSession(unrelatedUser.id);
-
-    const res = await app.request(`/api/v1/disputes/${dispute.id}`, {
-      method: "GET",
-      headers: {
-        Cookie: `session=${unrelatedToken}`,
-      },
-    });
-
-    expect(res.status).toBe(403);
-
-    // Cleanup
-    await prisma.user.delete({ where: { id: unrelatedUser.id } });
-  });
-
-  // F. Duplicate open dispute falla
-  it("F. duplicate open dispute falla", async () => {
-    const res = await app.request("/api/v1/disputes", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: `session=${customerToken}`,
-      },
-      body: JSON.stringify({
-        request_id: completedRequestId,
-        reason: "Intentando crear segunda disputa",
-      }),
-    });
-
-    expect(res.status).toBe(409);
-    const data = await res.json();
-    expect(data.error.code).toBe("CONFLICT");
-  });
-
-  // G. Request en estado no elegible falla
-  it("G. request en estado searching NO es elegible para disputa", async () => {
-    const res = await app.request("/api/v1/disputes", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: `session=${customerToken}`,
-      },
-      body: JSON.stringify({
-        request_id: requestId, // searching
-        reason: "Intentando disputar request en searching",
-      }),
-    });
-
-    expect(res.status).toBe(409);
-  });
-
-  // H. Admin puede listar disputas
-  it("H. admin puede listar todas las disputas", async () => {
-    const res = await app.request("/api/v1/disputes/admin/all", {
-      method: "GET",
-      headers: {
-        Cookie: `session=${adminToken}`,
-      },
-    });
-
-    expect(res.status).toBe(200);
-    const data = await res.json();
-    expect(data.data).toBeDefined();
-    expect(Array.isArray(data.data)).toBe(true);
-  });
-
-  // I. Non-admin NO puede usar admin/all
-  it("I. non-admin NO puede listar todas las disputas", async () => {
-    const res = await app.request("/api/v1/disputes/admin/all", {
-      method: "GET",
-      headers: {
-        Cookie: `session=${customerToken}`,
-      },
-    });
-
-    expect(res.status).toBe(403);
-  });
-
-  // J. Admin puede resolver disputa
-  it("J. admin puede resolver disputa", async () => {
-    const dispute = await prisma.dispute.findFirst({
-      where: { request_id: completedRequestId, status: "open" },
-    });
-
-    if (!dispute) {
-      throw new Error("No hay disputa abierta para resolver");
-    }
-
-    const res = await app.request(`/api/v1/disputes/${dispute.id}/resolve`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: `session=${adminToken}`,
-      },
-      body: JSON.stringify({
-        status: "resolved_customer",
-        resolution: "Se determinó que el servicio no fue completado según lo acordado",
-      }),
-    });
-
-    expect(res.status).toBe(200);
-    const data = await res.json();
-    expect(data.data.status).toBe("resolved_customer");
-    expect(data.data.resolved_by).toBe(adminId);
-  });
-
-  // K. Non-admin NO puede resolver
-  it("K. non-admin NO puede resolver disputa", async () => {
-    // Crear nueva disputa para test
-    const newRequestId = await createTestRequest(
-      customerId,
-      (await prisma.category.findFirst())!.id,
-      (await prisma.zone.findFirst())!.id,
-      "completed",
-      providerId
-    );
-
-    const newDispute = await prisma.dispute.create({
-      data: {
-        id: ulid(),
-        request_id: newRequestId,
-        opened_by: customerId,
-        reason: "Disputa para test de resolución no-admin",
-        status: "open",
-      },
-    });
-
-    const res = await app.request(`/api/v1/disputes/${newDispute.id}/resolve`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: `session=${customerToken}`,
-      },
-      body: JSON.stringify({
-        status: "resolved_customer",
-        resolution: "Intentando resolver sin permisos",
-      }),
-    });
-
-    expect(res.status).toBe(403);
-
-    // Cleanup
-    await prisma.dispute.delete({ where: { id: newDispute.id } });
-    await prisma.service_request.delete({ where: { id: newRequestId } });
-  });
-
-  // L. Disputa ya resuelta no puede resolverse otra vez
-  it("L. disputa ya resuelta NO puede resolverse otra vez", async () => {
-    const resolvedDispute = await prisma.dispute.findFirst({
-      where: { status: { in: ["resolved_customer", "resolved_provider"] } },
-    });
-
-    if (!resolvedDispute) {
-      throw new Error("No hay disputa resuelta para test");
-    }
-
-    const res = await app.request(`/api/v1/disputes/${resolvedDispute.id}/resolve`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: `session=${adminToken}`,
-      },
-      body: JSON.stringify({
-        status: "resolved_provider",
-        resolution: "Intentando resolver disputa ya resuelta",
-      }),
-    });
-
-    expect(res.status).toBe(409);
-  });
-
-  // M. Request sin provider no rompe resolución
-  it("M. request sin provider no rompe resolución admin", async () => {
-    const category = await prisma.category.findFirst();
-    const zone = await prisma.zone.findFirst();
-
-    // Crear request completado sin provider
-    const requestWithoutProvider = await createTestRequest(
-      customerId,
-      category!.id,
-      zone!.id,
-      "completed",
-      null // Sin provider
-    );
-
-    // Crear disputa
+  async function createDispute(requestId: string, status: DisputeStatus = "open") {
     const dispute = await prisma.dispute.create({
       data: {
         id: ulid(),
-        request_id: requestWithoutProvider,
+        request_id: requestId,
         opened_by: customerId,
-        reason: "Disputa sobre request sin provider",
-        status: "open",
+        reason: "Disputa propia del escenario de integración",
+        status,
+        ...(status === "open" ? {} : {
+          resolved_by: adminId,
+          resolution: "Resolución previa de este escenario",
+        }),
       },
     });
+    disputeIds.push(dispute.id);
+    return dispute;
+  }
 
-    const res = await app.request(`/api/v1/disputes/${dispute.id}/resolve`, {
+  function postDispute(requestId: string, cookie: string, reason = "El servicio no fue completado correctamente") {
+    return app.request("/api/v1/disputes", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: `session=${adminToken}`,
-      },
-      body: JSON.stringify({
-        status: "resolved_customer",
-        resolution: "Resolución de disputa sin provider",
-      }),
+      headers: { ...testHeaders(cookie), "Content-Type": "application/json" },
+      body: JSON.stringify({ request_id: requestId, reason }),
     });
+  }
 
-    expect(res.status).toBe(200);
+  function resolveDispute(disputeId: string, cookie: string, status: "resolved_customer" | "resolved_provider" = "resolved_customer") {
+    return app.request(`/api/v1/disputes/${disputeId}/resolve`, {
+      method: "POST",
+      headers: { ...testHeaders(cookie), "Content-Type": "application/json" },
+      body: JSON.stringify({ status, resolution: "Resolución válida de este escenario de integración" }),
+    });
+  }
 
-    // Cleanup
-    await prisma.dispute.delete({ where: { id: dispute.id } });
-    await prisma.service_request.delete({ where: { id: requestWithoutProvider } });
+  beforeAll(async () => {
+    customerId = (await createUser("Disputes Customer")).id;
+    providerUserId = (await createUser("Disputes Provider")).id;
+    adminId = (await createUser("Disputes Admin", "admin")).id;
+    providerProfileId = (await createProviderProfile(providerUserId)).id;
+    await prisma.admin_profile.create({ data: { user_id: adminId, admin_role: "admin" } });
+
+    const category = await prisma.category.create({
+      data: { id: `${fixturePrefix}-category`, name: "Disputes Test", icon: "test", group_name: "Test" },
+    });
+    categoryIds.push(category.id);
+    categoryId = category.id;
+    const zone = await prisma.zone.create({ data: { id: `${fixturePrefix}-zone`, name: "Disputes Test" } });
+    zoneIds.push(zone.id);
+    zoneId = zone.id;
+
+    customerCookie = await createTestCookie(customerId);
+    providerCookie = await createTestCookie(providerUserId);
+    adminCookie = await createTestCookie(adminId);
   });
 
-  // N. Reason demasiado corto falla
-  it("N. reason demasiado corto falla validación", async () => {
-    const category = await prisma.category.findFirst();
-    const zone = await prisma.zone.findFirst();
+  afterAll(async () => {
+    // Un handler puede crear la disputa antes de devolver un error. Recuperar
+    // únicamente las de nuestras solicitudes cubre ese caso y setup parcial.
+    const createdDisputes = requestIds.length > 0
+      ? await prisma.dispute.findMany({ where: { request_id: { in: requestIds } }, select: { id: true } })
+      : [];
+    const ownDisputeIds = [...new Set([...disputeIds, ...createdDisputes.map(({ id }) => id)])];
 
-    const newRequestId = await createTestRequest(
-      customerId,
-      category!.id,
-      zone!.id,
-      "completed"
-    );
-
-    const res = await app.request("/api/v1/disputes", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: `session=${customerToken}`,
-      },
-      body: JSON.stringify({
-        request_id: newRequestId,
-        reason: "Corto", // Menos de 10 caracteres
-      }),
+    await prisma.$transaction(async (tx) => {
+      const notificationFilters = [
+        ...(userIds.length > 0 ? [{ user_id: { in: userIds } }] : []),
+        ...requestIds.map((id) => ({ meta: { path: ["requestId"], equals: id } })),
+        ...ownDisputeIds.map((id) => ({ meta: { path: ["disputeId"], equals: id } })),
+      ];
+      if (notificationFilters.length > 0) {
+        await tx.notification.deleteMany({ where: { OR: notificationFilters } });
+      }
+      const auditFilters = [
+        ...(userIds.length > 0 ? [{ actor_id: { in: userIds } }] : []),
+        ...(ownDisputeIds.length > 0 ? [{ entity_type: "dispute", entity_id: { in: ownDisputeIds } }] : []),
+      ];
+      if (auditFilters.length > 0) {
+        await tx.admin_audit_log.deleteMany({ where: { OR: auditFilters } });
+      }
+      if (ownDisputeIds.length > 0) await tx.dispute.deleteMany({ where: { id: { in: ownDisputeIds } } });
+      if (requestIds.length > 0) await tx.service_request.deleteMany({ where: { id: { in: requestIds } } });
+      if (providerProfileIds.length > 0) await tx.provider_profile.deleteMany({ where: { id: { in: providerProfileIds } } });
+      if (userIds.length > 0) {
+        await tx.admin_profile.deleteMany({ where: { user_id: { in: userIds } } });
+        await tx.user.deleteMany({ where: { id: { in: userIds } } });
+      }
+      if (categoryIds.length > 0) await tx.category.deleteMany({ where: { id: { in: categoryIds } } });
+      if (zoneIds.length > 0) await tx.zone.deleteMany({ where: { id: { in: zoneIds } } });
     });
+  });
 
+  it("A. customer puede crear disputa sobre request completado propio", async () => {
+    const request = await createRequest();
+    const res = await postDispute(request.id, customerCookie);
+    expect(res.status).toBe(201);
+    const { data } = await res.json();
+    expect(data.id).toEqual(expect.any(String));
+    disputeIds.push(data.id);
+    expect(data.request_id).toBe(request.id);
+    expect(data.opened_by).toBe(customerId);
+    expect(data.status).toBe("open");
+    expect(await prisma.notification.count({
+      where: { user_id: adminId, kind: "dispute_opened", meta: { path: ["disputeId"], equals: data.id } },
+    })).toBe(1);
+  });
+
+  it("B. customer NO puede crear disputa sobre request ajeno", async () => {
+    const otherCustomer = await createUser("Disputes Other Customer");
+    const request = await createRequest("completed", otherCustomer.id);
+    const res = await postDispute(request.id, customerCookie);
+    expect(res.status).toBe(403);
+    expect(await prisma.dispute.count({ where: { request_id: request.id } })).toBe(0);
+  });
+
+  it("C. provider asignado puede crear disputa sobre request completado", async () => {
+    const request = await createRequest();
+    const res = await postDispute(request.id, providerCookie, "El cliente no pagó el servicio completado");
+    expect(res.status).toBe(201);
+    const { data } = await res.json();
+    expect(data.id).toEqual(expect.any(String));
+    disputeIds.push(data.id);
+    expect(data.opened_by).toBe(providerUserId);
+    expect(data.request.provider_id).toBe(providerProfileId);
+    expect(data.request_id).toBe(request.id);
+  });
+
+  it("D. provider ajeno NO puede crear disputa", async () => {
+    const request = await createRequest();
+    const otherProvider = await createUser("Disputes Other Provider");
+    await createProviderProfile(otherProvider.id);
+    const cookie = await createTestCookie(otherProvider.id);
+    const res = await postDispute(request.id, cookie);
+    expect(res.status).toBe(403);
+    expect(await prisma.dispute.count({ where: { request_id: request.id } })).toBe(0);
+  });
+
+  it("E. usuario no relacionado NO puede leer disputa", async () => {
+    const request = await createRequest();
+    const dispute = await createDispute(request.id);
+    const unrelatedUser = await createUser("Disputes Unrelated User");
+    const cookie = await createTestCookie(unrelatedUser.id);
+    const res = await app.request(`/api/v1/disputes/${dispute.id}`, { headers: testHeaders(cookie) });
+    expect(res.status).toBe(403);
+    const { error } = await res.json();
+    expect(error.code).toBe("FORBIDDEN");
+  });
+
+  it("F. duplicate open dispute falla", async () => {
+    const request = await createRequest();
+    await createDispute(request.id);
+    const res = await postDispute(request.id, customerCookie);
+    expect(res.status).toBe(409);
+    const { error } = await res.json();
+    expect(error.code).toBe("CONFLICT");
+    expect(await prisma.dispute.count({ where: { request_id: request.id, status: "open" } })).toBe(1);
+  });
+
+  it("G. request en estado searching NO es elegible para disputa", async () => {
+    const request = await createRequest("searching", customerId, null);
+    const res = await postDispute(request.id, customerCookie);
+    expect(res.status).toBe(409);
+    expect(await prisma.dispute.count({ where: { request_id: request.id } })).toBe(0);
+  });
+
+  it("H. admin puede listar todas las disputas", async () => {
+    const request = await createRequest();
+    const dispute = await createDispute(request.id);
+    const res = await app.request("/api/v1/disputes/admin/all?status=open&limit=100", { headers: testHeaders(adminCookie) });
+    expect(res.status).toBe(200);
+    const { data, meta } = await res.json();
+    expect(Array.isArray(data)).toBe(true);
+    expect(data).toEqual(expect.arrayContaining([expect.objectContaining({ id: dispute.id, request_id: request.id })]));
+    expect(meta.total).toBeGreaterThanOrEqual(1);
+  });
+
+  it("I. non-admin NO puede listar todas las disputas", async () => {
+    const res = await app.request("/api/v1/disputes/admin/all", { headers: testHeaders(customerCookie) });
+    expect(res.status).toBe(403);
+    const { error } = await res.json();
+    expect(error.code).toBe("FORBIDDEN");
+  });
+
+  it("J. admin puede resolver disputa", async () => {
+    const request = await createRequest();
+    const dispute = await createDispute(request.id);
+    const res = await resolveDispute(dispute.id, adminCookie);
+    expect(res.status).toBe(200);
+    const { data } = await res.json();
+    expect(data.status).toBe("resolved_customer");
+    expect(data.resolved_by).toBe(adminId);
+    expect(data.request.status).toBe("completed");
+    expect(await prisma.admin_audit_log.count({
+      where: { actor_id: adminId, action: "DISPUTE_RESOLVED", entity_type: "dispute", entity_id: dispute.id },
+    })).toBe(1);
+    const notifications = await prisma.notification.findMany({
+      where: { user_id: { in: [customerId, providerUserId] }, kind: "dispute_resolved", meta: { path: ["disputeId"], equals: dispute.id } },
+      select: { user_id: true },
+    });
+    expect(notifications.map(({ user_id }) => user_id).sort()).toEqual([customerId, providerUserId].sort());
+  });
+
+  it("K. non-admin NO puede resolver disputa", async () => {
+    const request = await createRequest();
+    const dispute = await createDispute(request.id);
+    const res = await resolveDispute(dispute.id, customerCookie);
+    expect(res.status).toBe(403);
+    expect(await prisma.dispute.findUnique({ where: { id: dispute.id }, select: { status: true } })).toEqual({ status: "open" });
+    expect(await prisma.admin_audit_log.count({ where: { entity_type: "dispute", entity_id: dispute.id } })).toBe(0);
+  });
+
+  it("L. disputa ya resuelta NO puede resolverse otra vez", async () => {
+    const request = await createRequest();
+    const dispute = await createDispute(request.id, "resolved_customer");
+    const res = await resolveDispute(dispute.id, adminCookie, "resolved_provider");
+    expect(res.status).toBe(409);
+    expect(await prisma.dispute.findUnique({
+      where: { id: dispute.id }, select: { status: true, resolution: true },
+    })).toEqual({ status: "resolved_customer", resolution: dispute.resolution });
+  });
+
+  it("M. request sin provider no rompe resolución admin", async () => {
+    const request = await createRequest("completed", customerId, null);
+    const dispute = await createDispute(request.id);
+    const res = await resolveDispute(dispute.id, adminCookie);
+    expect(res.status).toBe(200);
+    const { data } = await res.json();
+    expect(data.status).toBe("resolved_customer");
+    expect(data.request.provider_id).toBeNull();
+    const notifications = await prisma.notification.findMany({
+      where: { kind: "dispute_resolved", meta: { path: ["disputeId"], equals: dispute.id } },
+      select: { user_id: true },
+    });
+    expect(notifications).toEqual([{ user_id: customerId }]);
+  });
+
+  it("N. reason demasiado corto falla validación", async () => {
+    const request = await createRequest();
+    const res = await postDispute(request.id, customerCookie, "Corto");
     expect(res.status).toBe(400);
-
-    // Cleanup
-    await prisma.service_request.delete({ where: { id: newRequestId } });
+    expect(await prisma.dispute.count({ where: { request_id: request.id } })).toBe(0);
   });
 });
-
-// Helper functions
-async function createTestRequest(
-  customerId: string,
-  categoryId: string,
-  zoneId: string,
-  status: string,
-  providerId?: string | null
-): Promise<string> {
-  const requestId = ulid();
-  await prisma.service_request.create({
-    data: {
-      id: requestId,
-      code: `ALT-TEST-${Date.now()}`,
-      customer_id: customerId,
-      category_id: categoryId,
-      zone_id: zoneId,
-      description: "Test request",
-      when_type: "now",
-      status: status as any,
-      provider_id: providerId || null,
-    },
-  });
-  return requestId;
-}
-
-async function createTestSession(userId: string): Promise<string> {
-  // Mock session token para tests
-  // En producción, Better Auth maneja esto
-  const token = `test-session-${userId}-${Date.now()}`;
-  await prisma.session.create({
-    data: {
-      id: ulid(),
-      token,
-      userId,
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 horas
-    },
-  });
-  return token;
-}
