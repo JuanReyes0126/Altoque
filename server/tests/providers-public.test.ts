@@ -113,6 +113,11 @@ describe.runIf(HAS_DB)("Providers Public API", () => {
   });
 
   describe("GET /api/v1/providers/available", () => {
+    it.each(["-1", "NaN", "Infinity", "2.5"])("un límite %s se normaliza sin errores Prisma", async (limit) => {
+      const response = await app.request(`/api/v1/providers/available?limit=${limit}`);
+      expect(response.status).toBe(200);
+      expect(Array.isArray((await response.json()).data)).toBe(true);
+    });
     it("devuelve solo proveedores disponibles y verificados", async () => {
       const res = await app.request("/api/v1/providers/available?limit=50");
       expect(res.status).toBe(200);
@@ -143,6 +148,13 @@ describe.runIf(HAS_DB)("Providers Public API", () => {
   });
 
   describe("GET /api/v1/providers/:id", () => {
+    it("un perfil verificado con una cuenta bloqueada no aparece públicamente", async () => {
+      const provider = await createProvider("Blocked account provider", true, true);
+      await prisma.user.update({ where: { id: provider.user_id }, data: { status: "blocked" } });
+      expect((await app.request(`/api/v1/providers/${provider.id}`)).status).toBe(404);
+      const available = await app.request("/api/v1/providers/available?limit=50");
+      expect((await available.json()).data.map((item: { id: string }) => item.id)).not.toContain(provider.id);
+    });
     it("devuelve proveedor verificado con datos públicos completos", async () => {
       const res = await app.request(`/api/v1/providers/${verifiedProviderId}`);
       expect(res.status).toBe(200);
