@@ -42,6 +42,15 @@ const toSession = (u: ServerUser): Session => ({
 });
 
 interface BetterAuthSessionResponse { user: ServerUser; session: unknown }
+export interface CatalogCategory { id: string; name: string; icon: string; group_name: string }
+export interface PublicProvider {
+  id: string; name: string; image: string | null; business_name: string | null;
+  bio?: string | null; years_exp?: number | null; rating: number; reviews_count: number;
+  is_available?: boolean; avg_eta_min: number | null;
+  categories: Array<{ id: string; name: string; icon: string }>;
+  zones: Array<{ id: string; name: string }>;
+  recent_reviews?: Array<{ rating: number; comment: string | null; reviewer_name: string; created_at: string }>;
+}
 
 export const authApi = {
   /** Better Auth crea una cuenta sin sesión hasta verificar el correo. */
@@ -109,8 +118,8 @@ export const api = {
 
   /* ── catálogo ── F2: GET /categories · GET /zones (cacheables, raramente cambian) */
   categories: {
-    list: async (): Promise<Cat[]> => {
-      const res = await http<{ data: { categories: Cat[] } }>("/api/v1/categories");
+    list: async (): Promise<CatalogCategory[]> => {
+      const res = await http<{ data: { categories: CatalogCategory[] } }>("/api/v1/categories");
       return res.data.categories;
     },
     get: catById, // fallback local
@@ -131,15 +140,15 @@ export const api = {
       if (params?.page) query.set("page", String(params.page));
       if (params?.limit) query.set("limit", String(params.limit));
       const qs = query.toString();
-      const res = await http<{ data: any[]; meta: any }>(`/api/v1/providers${qs ? "?" + qs : ""}`);
+      const res = await http<{ data: PublicProvider[]; meta: { total: number; page: number; pages: number } }>(`/api/v1/providers${qs ? "?" + qs : ""}`);
       return res;
     },
     getById: async (id: string) => {
-      const res = await http<{ data: any }>(`/api/v1/providers/${id}`);
+      const res = await http<{ data: PublicProvider }>(`/api/v1/providers/${encodeURIComponent(id)}`);
       return res.data;
     },
     getAvailable: async (limit = 10) => {
-      const res = await http<{ data: any[] }>(`/api/v1/providers/available?limit=${limit}`);
+      const res = await http<{ data: PublicProvider[] }>(`/api/v1/providers/available?limit=${limit}`);
       return res.data;
     },
   },
