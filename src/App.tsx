@@ -20,6 +20,8 @@ import { ProviderOnboarding } from "./features/landing/Provider";
 import { PasswordRecovery } from "./features/landing/PasswordRecovery";
 import { ClientHome, ExploreView, ResultsView } from "./features/client/Home";
 import { ProProfile } from "./features/client/Profile";
+import { AddressesPage } from "./features/client/Addresses";
+import { SecurityPage } from "./features/client/Security";
 import { FavoritesTab, MeTab, RequestWizard, RequestsTab, TrackingView } from "./features/client/Flow";
 import { ProApp } from "./features/provider/ProApp";
 import { AdminHome } from "./features/admin/AdminHome";
@@ -61,6 +63,8 @@ function ClientShell() {
   else if (loc.pathname === `${PATHS.app}/solicitudes`) { activeTab = "jobs"; view = <RequestsTab go={go} />; }
   else if (loc.pathname === `${PATHS.app}/favoritos`) { activeTab = "favs"; view = <FavoritesTab go={go} />; }
   else if (loc.pathname === `${PATHS.app}/perfil`) { activeTab = "me"; view = <MeTab go={go} jump={jump} />; }
+  else if (loc.pathname === `${PATHS.app}/perfil/direcciones`) { activeTab = "me"; view = <AddressesPage />; }
+  else if (loc.pathname === `${PATHS.app}/perfil/seguridad`) { activeTab = "me"; view = <SecurityPage />; }
   else if (seg.length === 3 && seg[1] === "servicios" && seg[2]) view = <ResultsView key={seg[2]} catId={seg[2]} go={go} />;
   else if (seg.length === 3 && seg[1] === "profesional" && seg[2]) view = <ProProfile key={seg[2]} id={seg[2]} go={go} />;
   else if (loc.pathname === `${PATHS.app}/solicitar`)

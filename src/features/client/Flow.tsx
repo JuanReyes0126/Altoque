@@ -4,10 +4,11 @@ import { Icon } from "../../components/icons";
 import { AvailDot, Face, FadeUp, JobPhoto, MapCard, ProListItem, Radar, RowHead, Stars, Verif, useFakeLoad } from "../../components/ui/kit";
 import { useToast } from "../../components/Toast";
 import {
-  CATS, JOB_IMGS, PROBLEMS, ZONES, catById, clearSession, fmt, proById, prosByCat,
+  CATS, JOB_IMGS, PROBLEMS, ZONES, catById, fmt, proById, prosByCat,
   setRole, toggleFav, useApp, zoneById, type Tab, type View,
 } from "../../lib/state";
-import { api, authApi } from "../../lib/api";
+import { api } from "../../lib/api";
+import { endCurrentSession } from "../../lib/session-actions";
 import { PATHS } from "../../lib/router";
 import { DisputeModal } from "./DisputeModal";
 import { DisputeView } from "./DisputeView";
@@ -851,25 +852,27 @@ export function FavoritesTab({ go }: { go: (v: View) => void }) {
 export function MeTab({ go, jump }: { go: (v: View) => void; jump: (t: Tab) => void }) {
   const s = useApp();
   const nav = useNavigate();
-  const myName = s.session?.name ?? "María Peralta";
+  const myName = s.session?.name ?? "Tu cuenta";
+  const toast = useToast();
+  const [logoutBusy, setLogoutBusy] = useState(false);
   return (
     <div className="max-w-2xl mx-auto px-5 pb-10">
       <h1 className="font-disp font-bold text-[1.5rem] text-ink pt-6">Mi perfil</h1>
       <section className="card p-6 mt-5 flex items-center gap-4">
-        <Face face={{ f: 3, q: 3 }} name={myName} size="w-16 h-16" />
+        <span className="w-16 h-16 rounded-2xl bg-pinesoft text-pine grid place-items-center text-xl font-bold" aria-hidden>{myName.charAt(0)}</span>
         <div>
           <p className="font-disp font-bold text-[1.15rem] text-ink">{myName}</p>
-          <p className="text-[0.78rem] text-mut font-semibold mt-0.5">{zoneById(s.zoneId).name} · Santiago</p>
+          <p className="text-[0.78rem] text-mut font-semibold mt-0.5">{s.session?.email}</p>
           <p className="text-[0.7rem] text-soft font-bold mt-1">Miembro nuevo</p>
         </div>
       </section>
 
       <section className="card mt-4 divide-y divide-line2">
         {[
-          { ic: "pin", l: "Mis direcciones", fn: () => {} },
+          { ic: "pin", l: "Mis direcciones", fn: () => nav("/app/perfil/direcciones") },
           { ic: "clip", l: "Historial de servicios", fn: () => jump("jobs") },
           { ic: "heart", l: "Favoritos", fn: () => jump("favs") },
-          { ic: "shield", l: "Seguridad y privacidad", fn: () => {} },
+          { ic: "shield", l: "Seguridad y privacidad", fn: () => nav("/app/perfil/seguridad") },
         ].map((r) => (
           <button key={r.l} onClick={r.fn} className="w-full flex items-center gap-3.5 px-5 py-4 text-left hover:bg-tint/50 transition-colors">
             <span className="w-9 h-9 rounded-xl bg-tint text-mut grid place-items-center shrink-0"><Icon name={r.ic as never} className="w-4.5 h-4.5" strokeWidth={2} /></span>
@@ -890,12 +893,14 @@ export function MeTab({ go, jump }: { go: (v: View) => void; jump: (t: Tab) => v
 
       <button
         onClick={async () => {
-          // F1.8: logout REAL — revoca la sesión en el servidor (cookie HttpOnly)
-          await authApi.signOut().catch(() => {});
-          clearSession(); // limpia SOLO el estado cliente derivado de la sesión
-          nav(PATHS.home);
+          if (logoutBusy) return;
+          setLogoutBusy(true);
+          try { await endCurrentSession(); nav(PATHS.home); }
+          catch { toast.showToast("error", "No pudimos cerrar la sesión. Inténtalo nuevamente."); }
+          finally { setLogoutBusy(false); }
         }}
-        className="w-full card card-h mt-4 p-5 flex items-center gap-4 text-left border-cor/30"
+        disabled={logoutBusy}
+        className="w-full card card-h mt-4 p-5 flex items-center gap-4 text-left border-cor/30 disabled:opacity-50"
       >
         <span className="w-11 h-11 rounded-xl bg-corsoft text-cor grid place-items-center shrink-0"><Icon name="logout" className="w-5 h-5" strokeWidth={1.9} /></span>
         <span className="flex-1">
