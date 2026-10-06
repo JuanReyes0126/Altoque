@@ -44,10 +44,11 @@ const toSession = (u: ServerUser): Session => ({
 interface BetterAuthSessionResponse { user: ServerUser; session: unknown }
 
 export const authApi = {
-  /** POST /api/v1/auth/sign-up/email — crea el usuario REAL en Neon.
-   *  Con requireEmailVerification NO emite sesión: devuelve token de verificación. */
-  signUp: (d: { name: string; email: string; password: string; phone?: string }) =>
-    http<{ token?: string }>("/api/v1/auth/sign-up/email", { body: d }),
+  /** Better Auth crea una cuenta sin sesión hasta verificar el correo. */
+  signUp: (d: { name: string; email: string; password: string; phone?: string }, callbackPath = "/") =>
+    http<{ token: null; user: ServerUser }>("/api/v1/auth/sign-up/email", {
+      body: { ...d, ...(typeof window !== "undefined" ? { callbackURL: `${window.location.origin}${callbackPath}` } : {}) },
+    }),
 
   /** POST /api/v1/auth/sign-in/email — emite la cookie de sesión. */
   signIn: async (d: { email: string; password: string }): Promise<Session> => {
@@ -69,6 +70,26 @@ export const authApi = {
 
   /** POST /api/v1/auth/sign-out — revoca la sesión en el servidor. */
   signOut: () => http<void>("/api/v1/auth/sign-out", { body: {}, noContent: true }),
+
+  /** Better Auth valida la contraseña actual y gestiona las sesiones. */
+  changePassword: async (d: { currentPassword: string; newPassword: string; revokeOtherSessions?: boolean }): Promise<void> => {
+    await http<unknown>("/api/v1/auth/change-password", { method: "POST", body: d });
+  },
+
+  revokeOtherSessions: async (): Promise<void> => {
+    await http<unknown>("/api/v1/auth/revoke-other-sessions", { method: "POST", body: {} });
+  },
+
+  requestPasswordReset: async (email: string): Promise<void> => {
+    await http<unknown>("/api/v1/auth/request-password-reset", {
+      method: "POST",
+      body: { email, redirectTo: `${window.location.origin}/?flow=password-reset#/recuperar-contrasena` },
+    });
+  },
+
+  resetPassword: async (token: string, newPassword: string): Promise<void> => {
+    await http<unknown>("/api/v1/auth/reset-password", { method: "POST", body: { token, newPassword } });
+  },
 
   /** POST /api/v1/auth/send-verification-email — reenvío del enlace. */
   resendVerification: (email: string) =>

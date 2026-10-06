@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "../../components/icons";
 import { AvailDot, Face, FadeUp, MapCard, Sheet, Stars, Toggle, Verif } from "../../components/ui/kit";
@@ -7,7 +7,8 @@ import {
 } from "../../lib/state";
 import { authApi } from "../../lib/api";
 import { ApiHttpError } from "../../lib/http";
-import { PATHS, viewToPath } from "../../lib/router";
+import { PATHS, roleHome, viewToPath } from "../../lib/router";
+import { EmailVerificationPanel, resendButtonLabel, useVerificationResend, verificationErrorMessage } from "./EmailVerification";
 
 /* ════════════════ helpers ════════════════ */
 const LAND_CATS = [
@@ -665,12 +666,16 @@ function AuthSheet({ auth, onClose }: { auth: AuthState; onClose: () => void }) 
   const [error, setError] = useState<{ code: string; message: string } | null>(null);
   /** cuenta creada pendiente de verificación de correo */
   const [pendingEmail, setPendingEmail] = useState<string | null>(null);
-  const [resent, setResent] = useState(false);
+  const [emailSent, setEmailSent] = useState(false);
+  const resendState = useVerificationResend();
+  const resetResend = resendState.reset;
 
   // sincroniza modo cuando se abre
-  const [lastOpen, setLastOpen] = useState(false);
-  if (auth && !lastOpen) { setLastOpen(true); setMode(auth.mode); setError(null); setPendingEmail(null); setResent(false); }
-  if (!auth && lastOpen) setLastOpen(false);
+  useEffect(() => {
+    resetResend();
+    setError(null); setPendingEmail(null); setEmailSent(false); setPass("");
+    if (auth) setMode(auth.mode);
+  }, [auth, resetResend]);
 
   const fail = (e: unknown, fallback: string) => {
     const code = e instanceof ApiHttpError ? e.code : "ERROR";
@@ -680,6 +685,7 @@ function AuthSheet({ auth, onClose }: { auth: AuthState; onClose: () => void }) 
       : code === "INVALID_EMAIL_OR_PASSWORD" ? "Correo o contraseña incorrectos."
       : code === "EMAIL_NOT_VERIFIED" ? "Tu correo aún no está verificado. Revisa tu bandeja de entrada."
       : code === "RATE_LIMITED" ? "Demasiados intentos. Espera unos minutos."
+      : code === "EMAIL_NOT_CONFIGURED" || code === "VERIFICATION_EMAIL_FAILED" ? verificationErrorMessage(e)
       : raw;
     setError({ code, message });
   };
@@ -691,10 +697,9 @@ function AuthSheet({ auth, onClose }: { auth: AuthState; onClose: () => void }) 
     try {
       if (mode === "signup") {
         await authApi.signUp({ name: name.trim(), email: email.trim(), password: pass, ...(phone.trim() ? { phone: phone.trim() } : {}) });
-        // requireEmailVerification: la cuenta existe en Neon, pero NO hay sesión
-        // hasta verificar el correo. Sin proveedor de email (F2) el enlace se
-        // imprime en los Function Logs de Vercel.
+        // Better Auth no emite sesión hasta verificar el correo.
         setPendingEmail(email.trim());
+        setEmailSent(true);
         setName(""); setPass("");
       } else {
         const session = await authApi.signIn({ email: email.trim(), password: pass });
@@ -703,9 +708,12 @@ function AuthSheet({ auth, onClose }: { auth: AuthState; onClose: () => void }) 
         setSession(session);
         setPass("");
         onClose();
-        nav(intent ? viewToPath(intent) : PATHS.app);
+        nav(session.role === "customer" && intent ? viewToPath(intent) : roleHome(session.role));
       }
     } catch (e) {
+      if (mode === "signup" && e instanceof ApiHttpError && e.code === "VERIFICATION_EMAIL_FAILED") {
+        setPendingEmail(email.trim()); setEmailSent(false); setPass("");
+      }
       fail(e, "No pudimos completar la operación. Inténtalo de nuevo.");
     } finally {
       setBusy(false);
@@ -715,39 +723,17 @@ function AuthSheet({ auth, onClose }: { auth: AuthState; onClose: () => void }) 
   const resend = async () => {
     const target = pendingEmail ?? email.trim();
     if (!target) return;
-    try {
-      await authApi.resendVerification(target);
-      setResent(true);
-    } catch {
-      setError({ code: "ERROR", message: "No pudimos reenviar el correo. Inténtalo de nuevo." });
-    }
+    setError(null);
+    if (await resendState.resend(target)) { setPendingEmail(target); }
   };
 
   return (
     <Sheet open={!!auth} onClose={onClose} title={pendingEmail ? "Verifica tu correo" : mode === "signup" ? "Crea tu cuenta" : "Bienvenido de vuelta"}>
       {pendingEmail ? (
-        <div className="text-center py-2">
-          <span className="w-16 h-16 rounded-2xl bg-pinesoft text-pine grid place-items-center mx-auto">
-            <Icon name="doc" className="w-8 h-8" strokeWidth={1.8} />
-          </span>
-          <p className="font-disp font-bold text-lg text-ink mt-5">Te enviamos un correo</p>
-          <p className="text-[0.85rem] text-mut font-medium leading-relaxed mt-2 max-w-xs mx-auto">
-            Tu cuenta <strong className="text-ink">{pendingEmail}</strong> fue creada. Confirma tu correo con el enlace que recibas para activar tu sesión.
-          </p>
-          <div className="card p-4 mt-5 text-left">
-            <p className="text-[0.74rem] text-mut font-semibold leading-relaxed">
-              <span className="font-extrabold text-sun2">En Preview:</span> aún no hay proveedor de email — el enlace de verificación aparece en los <strong className="text-ink">Function Logs de Vercel</strong> como <code className="text-[0.68rem] bg-tint px-1.5 py-0.5 rounded">[altoque:email]</code>.
-            </p>
-          </div>
-          <div className="grid gap-2.5 mt-5">
-            <button onClick={() => { setPendingEmail(null); setMode("login"); }} className="btn-pine w-full h-12 text-[0.9rem]">
-              Ya verifiqué — iniciar sesión
-            </button>
-            <button onClick={resend} className="btn-ghost w-full h-12 text-[0.9rem]">
-              {resent ? "Correo reenviado ✓" : "Reenviar correo"}
-            </button>
-          </div>
-        </div>
+        <EmailVerificationPanel email={pendingEmail} sent={emailSent}
+          error={error?.message ?? resendState.error} busy={resendState.busy}
+          cooldown={resendState.cooldown} accepted={resendState.accepted}
+          onResend={resend} onContinue={() => { setPendingEmail(null); setMode("login"); setError(null); }} />
       ) : (
         <>
           <div className="grid grid-cols-2 gap-1 p-1 rounded-full bg-tint mb-5">
@@ -778,8 +764,8 @@ function AuthSheet({ auth, onClose }: { auth: AuthState; onClose: () => void }) 
                 <span>
                   {error.message}
                   {error.code === "EMAIL_NOT_VERIFIED" && (
-                    <button type="button" onClick={resend} className="block underline underline-offset-2 mt-1 text-[0.76rem]">
-                      {resent ? "Correo reenviado ✓" : "Reenviar correo de verificación"}
+                    <button type="button" onClick={resend} disabled={resendState.busy || resendState.cooldown > 0} className="block underline underline-offset-2 mt-1 text-[0.76rem] disabled:opacity-60">
+                      {resendButtonLabel(resendState.busy, resendState.cooldown)}
                     </button>
                   )}
                   {error.code === "USER_ALREADY_EXISTS" && (
@@ -791,9 +777,12 @@ function AuthSheet({ auth, onClose }: { auth: AuthState; onClose: () => void }) 
               </div>
             )}
 
+            {resendState.error && <p role="alert" className="text-cor text-[0.8rem] font-semibold">{resendState.error}</p>}
+
             <button type="submit" disabled={busy} className="btn-pine w-full h-13 text-[0.95rem] disabled:opacity-60">
               {busy ? "Un momento…" : mode === "signup" ? "Crear cuenta" : "Entrar"} {!busy && <Icon name="arrow" className="w-4.5 h-4.5" strokeWidth={2.2} />}
             </button>
+            {mode === "login" && <button type="button" disabled={busy} onClick={() => { onClose(); nav("/recuperar-contrasena"); }} className="btn-ghost w-full h-11">Olvidé mi contraseña</button>}
           </form>
 
           <p className="text-center text-[0.72rem] text-soft font-semibold mt-4 leading-relaxed">

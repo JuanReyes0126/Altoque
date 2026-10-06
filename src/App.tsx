@@ -17,6 +17,7 @@ import { PATHS, RequireRole, roleHome, tabPath, viewToPath } from "./lib/router"
 
 import { Landing } from "./features/landing/Landing";
 import { ProviderOnboarding } from "./features/landing/Provider";
+import { PasswordRecovery } from "./features/landing/PasswordRecovery";
 import { ClientHome, ExploreView, ResultsView } from "./features/client/Home";
 import { ProProfile } from "./features/client/Profile";
 import { FavoritesTab, MeTab, RequestWizard, RequestsTab, TrackingView } from "./features/client/Flow";
@@ -183,6 +184,7 @@ export default function App() {
             {/* público */}
             <Route path="/" element={<PublicHome />} />
             <Route path="/proveedores" element={<ProviderOnboarding />} />
+            <Route path="/recuperar-contrasena" element={<PasswordRecovery />} />
 
             {/* cliente */}
             <Route path="/app/*" element={<RequireRole roles={["customer", "provider", "admin"]}><ClientShell /></RequireRole>} />
