@@ -6,9 +6,12 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "../../components/icons";
 import { useToast } from "../../components/Toast";
-import { clearSession, useApp } from "../../lib/state";
-import { api, authApi } from "../../lib/api";
+import { useApp } from "../../lib/state";
+import { api } from "../../lib/api";
+import { endCurrentSession } from "../../lib/session-actions";
 import { PATHS } from "../../lib/router";
+import { useApiPolling } from "../../lib/use-api-polling";
+import { AdminDataState } from "./AdminDataState";
 
 type AdminTab = "dashboard" | "users" | "providers" | "requests" | "disputes" | "audit";
 
@@ -17,16 +20,7 @@ export function AdminHome() {
   const { session } = useApp();
   const toast = useToast();
   const [tab, setTab] = useState<AdminTab>("dashboard");
-  const [metrics, setMetrics] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-
-  // Cargar métricas reales del dashboard
-  useEffect(() => {
-    api.admin.getMetrics()
-      .then(setMetrics)
-      .catch(() => toast.showToast("error", "Error al cargar métricas del dashboard"))
-      .finally(() => setLoading(false));
-  }, []);
+  const { data: metrics, loading, error, retry } = useApiPolling(api.admin.getMetrics);
 
   if (loading) {
     return (
@@ -59,9 +53,8 @@ export function AdminHome() {
             </span>
             <button
               onClick={async () => {
-                await authApi.signOut().catch(() => {});
-                clearSession();
-                nav(PATHS.home);
+                try { await endCurrentSession(); nav(PATHS.home); }
+                catch { toast.showToast("error", "No pudimos cerrar la sesión. Inténtalo nuevamente."); }
               }}
               className="btn-ghost h-9 px-4 text-[0.8rem]"
             >
@@ -96,7 +89,7 @@ export function AdminHome() {
 
       {/* Content */}
       <div className="max-w-7xl mx-auto px-5 mt-6">
-        {tab === "dashboard" && metrics && <DashboardView metrics={metrics} />}
+        {tab === "dashboard" && (error || !metrics ? <AdminDataState loading={loading} error={error} empty={!metrics} label="métricas" onRetry={retry} /> : <DashboardView metrics={metrics} />)}
         {tab === "users" && <UsersView />}
         {tab === "providers" && <ProvidersView />}
         {tab === "requests" && <RequestsView />}
@@ -146,21 +139,13 @@ function DashboardView({ metrics }: { metrics: any }) {
 }
 
 function UsersView() {
-  const [users, setUsers] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const toast = useToast();
+  const { data: result, loading, error, retry } = useApiPolling(api.admin.getUsers);
+  const users = result?.data ?? [];
 
-  useEffect(() => {
-    api.admin.getUsers()
-      .then((res) => setUsers(res.data))
-      .catch(() => toast.showToast("error", "Error al cargar usuarios"))
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) return <div className="text-center py-12 text-mut">Cargando usuarios...</div>;
+  if (loading || error || users.length === 0) return <AdminDataState loading={loading} error={error} empty={users.length === 0} label="usuarios" onRetry={retry} />;
 
   return (
-    <div className="card overflow-hidden">
+    <div className="card overflow-x-auto">
       <table className="w-full">
         <thead className="bg-tint border-b border-line2">
           <tr>
@@ -209,25 +194,14 @@ function UsersView() {
 }
 
 function ProvidersView() {
-  const [providers, setProviders] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data: result, loading, error, retry } = useApiPolling(api.admin.getProviders);
+  const providers = result?.data ?? [];
   const toast = useToast();
-
-  useEffect(() => {
-    api.admin.getProviders()
-      .then((res) => setProviders(res.data))
-      .catch((err) => {
-        setError("Error al cargar proveedores");
-        toast.showToast("error", "Error al cargar la lista de proveedores");
-      })
-      .finally(() => setLoading(false));
-  }, []);
 
   const handleApprove = async (id: string) => {
     try {
       await api.admin.approveProvider(id);
-      setProviders(providers.map((p) => p.id === id ? { ...p, verification_status: "verified" } : p));
+      retry();
       toast.showToast("success", "Proveedor aprobado correctamente");
     } catch (err) {
       toast.showToast("error", "Error al aprobar el proveedor");
@@ -237,14 +211,14 @@ function ProvidersView() {
   const handleReject = async (id: string) => {
     try {
       await api.admin.rejectProvider(id, "Rechazado por administrador");
-      setProviders(providers.map((p) => p.id === id ? { ...p, verification_status: "rejected" } : p));
+      retry();
       toast.showToast("success", "Proveedor rechazado correctamente");
     } catch (err) {
       toast.showToast("error", "Error al rechazar el proveedor");
     }
   };
 
-  if (loading) return <div className="text-center py-12 text-mut">Cargando proveedores...</div>;
+  if (loading || error || providers.length === 0) return <AdminDataState loading={loading} error={error} empty={providers.length === 0} label="proveedores" onRetry={retry} />;
 
   return (
     <div className="space-y-3">
@@ -285,18 +259,10 @@ function ProvidersView() {
 }
 
 function RequestsView() {
-  const [requests, setRequests] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const toast = useToast();
+  const { data: result, loading, error, retry } = useApiPolling(api.admin.getRequests);
+  const requests = result?.data ?? [];
 
-  useEffect(() => {
-    api.admin.getRequests()
-      .then((res) => setRequests(res.data))
-      .catch(() => toast.showToast("error", "Error al cargar solicitudes"))
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) return <div className="text-center py-12 text-mut">Cargando solicitudes...</div>;
+  if (loading || error || requests.length === 0) return <AdminDataState loading={loading} error={error} empty={requests.length === 0} label="solicitudes" onRetry={retry} />;
 
   return (
     <div className="space-y-3">
@@ -360,6 +326,7 @@ function DisputesView() {
       loadDisputes(); // Recargar lista
     } catch (err) {
       toast.showToast("error", "Error al resolver la disputa");
+      throw err;
     }
   };
 
@@ -581,21 +548,13 @@ function ResolveDisputeModal({ dispute, onClose, onResolve }: { dispute: any; on
 }
 
 function AuditView() {
-  const [logs, setLogs] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const toast = useToast();
+  const { data: result, loading, error, retry } = useApiPolling(api.admin.getAuditLogs);
+  const logs = result?.data ?? [];
 
-  useEffect(() => {
-    api.admin.getAuditLogs()
-      .then((res) => setLogs(res.data))
-      .catch(() => toast.showToast("error", "Error al cargar logs de auditoría"))
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) return <div className="text-center py-12 text-mut">Cargando logs...</div>;
+  if (loading || error || logs.length === 0) return <AdminDataState loading={loading} error={error} empty={logs.length === 0} label="registros de auditoría" onRetry={retry} />;
 
   return (
-    <div className="card overflow-hidden">
+    <div className="card overflow-x-auto">
       <table className="w-full">
         <thead className="bg-tint border-b border-line2">
           <tr>
