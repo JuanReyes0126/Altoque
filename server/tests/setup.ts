@@ -16,4 +16,4 @@ process.env.BETTER_AUTH_SECRET = HAS_DB
   : "altoque-test-secret-altoque-test-secret-32";
 process.env.APP_URL = "http://localhost:3000";
 process.env.NODE_ENV = "test";
-for (const key of ["ALTOQUE_DIAG", "VERCEL_ENV", "VERCEL_URL", "EXTRA_TRUSTED_ORIGINS", "RESEND_API_KEY", "BLOB_READ_WRITE_TOKEN", "BLOB_PRIVATE_READ_WRITE_TOKEN"]) delete process.env[key];
+for (const key of ["ALTOQUE_DIAG", "VERCEL_ENV", "VERCEL_URL", "EXTRA_TRUSTED_ORIGINS", "RESEND_API_KEY", "EMAIL_FROM", "BLOB_READ_WRITE_TOKEN", "BLOB_PRIVATE_READ_WRITE_TOKEN"]) delete process.env[key];

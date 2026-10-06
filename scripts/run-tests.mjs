@@ -9,9 +9,13 @@ const integration = process.argv[2] === "integration";
 const testArgs = process.argv.slice(3);
 const environment = { ...process.env };
 for (const key of Object.keys(environment)) {
-  if (/DATABASE|NEON|BETTER_AUTH|RESEND|BLOB|VERCEL|ALTOQUE|SEED_|APP_URL|EXTRA_TRUSTED_ORIGINS/.test(key)) delete environment[key];
+  if (/DATABASE|NEON|BETTER_AUTH|RESEND|EMAIL_FROM|BLOB|VERCEL|ALTOQUE|SEED_|APP_URL|EXTRA_TRUSTED_ORIGINS/.test(key)) delete environment[key];
 }
-Object.assign(environment, { NODE_ENV: "test", APP_URL: "http://localhost:3000", ALTOQUE_TEST_DB: "0" });
+Object.assign(environment, {
+  NODE_ENV: "test", APP_URL: "http://localhost:3000", ALTOQUE_TEST_DB: "0", ALTOQUE_SAFE_VALIDATION: "1",
+  // Prisma carga dotenv/config: impedir incluso la lectura de .env compartido.
+  DOTENV_CONFIG_PATH: join(tmpdir(), `altoque-no-env-${randomBytes(16).toString("hex")}`),
+});
 const secrets = [];
 function redact(text) {
   for (const secret of secrets) text = text.split(secret).join("[REDACTED]");
