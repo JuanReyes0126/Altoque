@@ -65,9 +65,11 @@ export interface FileStore {
 }
 
 export function fileStore(): FileStore {
-  if (!process.env.BLOB_READ_WRITE_TOKEN || !process.env.BLOB_PRIVATE_READ_WRITE_TOKEN) {
-    throw new AppError("INTERNAL_ERROR", "Almacenamiento no configurado (faltan tokens BLOB_*)", 503);
-  }
+  const token = (name: "BLOB_READ_WRITE_TOKEN" | "BLOB_PRIVATE_READ_WRITE_TOKEN") => {
+    const configured = process.env[name];
+    if (!configured) throw new AppError("INTERNAL_ERROR", "Almacenamiento no disponible", 503);
+    return configured;
+  };
 
   // Importar dinámicamente para evitar errores en entornos sin @vercel/blob
   let blobModule: any;
@@ -80,32 +82,30 @@ export function fileStore(): FileStore {
 
   return {
     async putPrivate(key: string, bytes: Uint8Array, contentType: string): Promise<void> {
+      const privateToken = token("BLOB_PRIVATE_READ_WRITE_TOKEN");
       const blob = await getBlob();
       await blob.put(key, bytes, {
         access: "private",
-        token: process.env.BLOB_PRIVATE_READ_WRITE_TOKEN!,
+        token: privateToken,
         contentType,
       });
     },
 
     async putPublic(key: string, bytes: Uint8Array, contentType: string): Promise<{ url: string }> {
+      const publicToken = token("BLOB_READ_WRITE_TOKEN");
       const blob = await getBlob();
       const result = await blob.put(key, bytes, {
         access: "public",
-        token: process.env.BLOB_READ_WRITE_TOKEN!,
+        token: publicToken,
         contentType,
       });
       return { url: result.url };
     },
 
-    async getPrivateSignedUrl(key: string, ttlSeconds: number): Promise<string> {
-      const blob = await getBlob();
-      const result = await blob.getSignedUrl(key, {
-        token: process.env.BLOB_PRIVATE_READ_WRITE_TOKEN!,
-        access: "private",
-        validUntil: new Date(Date.now() + ttlSeconds * 1000),
-      });
-      return result.signedUrl;
+    async getPrivateSignedUrl(_key: string, _ttlSeconds: number): Promise<string> {
+      // @vercel/blob 2.8.0 no ofrece getSignedUrl. Se requiere un proxy de
+      // lectura con autorización antes de habilitar documentos privados.
+      throw new AppError("INTERNAL_ERROR", "La lectura de archivos privados todavía no está disponible", 503);
     },
   };
 }
