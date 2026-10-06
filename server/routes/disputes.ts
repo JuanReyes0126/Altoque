@@ -9,12 +9,14 @@
  */
 import { Hono } from "hono";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../database/prisma.js";
 import { requireAuth, requireVerifiedEmail, requirePermission, type AuthEnv } from "../middleware/auth.js";
 import { ok, page, pageMeta, parsePaging } from "../lib/envelope.js";
 import { AppError } from "../lib/errors.js";
 import { ulid } from "../lib/ids.js";
 import { audit } from "../lib/audit.js";
+import { hasAdminPermission } from "../lib/permissions.js";
 
 export const disputeRoutes = new Hono<AuthEnv>();
 
@@ -22,7 +24,7 @@ export const disputeRoutes = new Hono<AuthEnv>();
 // Listar todas las disputas (admin) - DEBE IR ANTES DE /:id para evitar colisión
 disputeRoutes.get("/admin/all", requireAuth, requireVerifiedEmail, requirePermission("disputes.resolve"), async (c) => {
   const { page: pageNum, limit, skip } = parsePaging(c.req.query());
-  const status = c.req.query("status");
+  const status = z.enum(["open", "resolved_customer", "resolved_provider"]).optional().parse(c.req.query("status"));
 
   const where: any = {};
   if (status) where.status = status;
@@ -62,8 +64,8 @@ disputeRoutes.post("/", requireAuth, requireVerifiedEmail, async (c) => {
   const body = await c.req.json();
 
   const schema = z.object({
-    request_id: z.string(),
-    reason: z.string().min(10).max(2000),
+    request_id: z.string().min(1).max(100),
+    reason: z.string().trim().min(10).max(2000),
   });
 
   const data = schema.parse(body);
@@ -107,46 +109,58 @@ disputeRoutes.post("/", requireAuth, requireVerifiedEmail, async (c) => {
     throw AppError.conflict("Solo se pueden disputar solicitudes completadas, confirmadas o revisadas");
   }
 
-  // Crear disputa
-  const dispute = await prisma.dispute.create({
-    data: {
-      id: ulid(),
-      request_id: data.request_id,
-      opened_by: user.id,
-      reason: data.reason,
-      status: "open",
-    },
-    include: {
-      request: {
+  // La disputa y sus notificaciones se confirman o revierten juntas.
+  let dispute;
+  try {
+    dispute = await prisma.$transaction(async (tx) => {
+      const created = await tx.dispute.create({
+        data: {
+          id: ulid(),
+          request_id: data.request_id,
+          opened_by: user.id,
+          reason: data.reason,
+          status: "open",
+        },
         include: {
-          customer: { select: { id: true, name: true, email: true } },
-          provider: {
+          request: {
             include: {
-              user: { select: { id: true, name: true, email: true } },
+              customer: { select: { id: true, name: true, email: true } },
+              provider: {
+                include: {
+                  user: { select: { id: true, name: true, email: true } },
+                },
+              },
             },
           },
         },
-      },
-    },
-  });
+      });
 
-  // Notificar al admin (crear notificación para todos los admins)
-  const admins = await prisma.user.findMany({
-    where: { role: "admin" },
-    select: { id: true },
-  });
+      const admins = await tx.user.findMany({
+        where: { role: "admin", status: "active", emailVerified: true, admin_profile: { admin_role: { in: ["moderator", "admin", "super_admin"] } } },
+        select: { id: true },
+      });
 
-  if (admins.length > 0) {
-    await prisma.notification.createMany({
-      data: admins.map((admin) => ({
-        id: ulid(),
-        user_id: admin.id,
-        kind: "dispute_opened",
-        title: "Nueva disputa abierta",
-        body: `Se ha abierto una disputa para la solicitud ${request.code}`,
-        meta: { disputeId: dispute.id, requestId: request.id },
-      })),
+      if (admins.length > 0) {
+        await tx.notification.createMany({
+          data: admins.map((admin) => ({
+            id: ulid(),
+            user_id: admin.id,
+            kind: "dispute_opened",
+            title: "Nueva disputa abierta",
+            body: `Se ha abierto una disputa para la solicitud ${request.code}`,
+            meta: { disputeId: created.id, requestId: request.id },
+          })),
+        });
+      }
+      return created;
     });
+  } catch (error) {
+    const target = error instanceof Prisma.PrismaClientKnownRequestError ? error.meta?.target : undefined;
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002" &&
+      ((Array.isArray(target) && target.length === 1 && target[0] === "request_id") || target === "dispute_one_open_per_request")) {
+      throw AppError.conflict("Ya existe una disputa abierta para esta solicitud");
+    }
+    throw error;
   }
 
   return c.json(ok(dispute), 201);
@@ -165,6 +179,7 @@ disputeRoutes.get("/", requireAuth, requireVerifiedEmail, async (c) => {
 
   // Disputas donde el usuario es cliente o proveedor
   const where = {
+    ...(c.req.query("request_id") ? { request_id: c.req.query("request_id")! } : {}),
     OR: [
       { opened_by: user.id },
       { resolved_by: user.id },
@@ -239,7 +254,8 @@ disputeRoutes.get("/:id", requireAuth, requireVerifiedEmail, async (c) => {
     where: { user_id: user.id },
   });
   const isProvider = provider && dispute.request.provider_id === provider.id;
-  const isAdmin = user.role === "admin";
+  const adminProfile = user.role === "admin" ? await prisma.admin_profile.findUnique({ where: { user_id: user.id } }) : null;
+  const isAdmin = adminProfile && hasAdminPermission(adminProfile.admin_role, "disputes.resolve");
 
   if (!isOpener && !isCustomer && !isProvider && !isAdmin) {
     throw AppError.forbidden("No tienes permiso para ver esta disputa");
@@ -257,7 +273,7 @@ disputeRoutes.post("/:id/resolve", requireAuth, requireVerifiedEmail, requirePer
 
   const schema = z.object({
     status: z.enum(["resolved_customer", "resolved_provider"]),
-    resolution: z.string().min(10).max(2000),
+    resolution: z.string().trim().min(10).max(2000),
   });
 
   const data = schema.parse(body);
@@ -274,67 +290,69 @@ disputeRoutes.post("/:id/resolve", requireAuth, requireVerifiedEmail, requirePer
     throw AppError.conflict("Esta disputa ya fue resuelta");
   }
 
-  // Resolver disputa
-  const resolved = await prisma.dispute.update({
-    where: { id: disputeId },
-    data: {
-      status: data.status,
-      resolved_by: admin.id,
-      resolution: data.resolution,
-    },
-    include: {
-      request: true,
-    },
-  });
-
-  // Auditoría
-  await audit(prisma, {
-    id: admin.id,
-    name: admin.name,
-    adminRole: c.get("adminRole") || "moderator",
-  }, {
-    action: "DISPUTE_RESOLVED",
-    entityType: "dispute",
-    entityId: disputeId,
-    metadata: { status: data.status, resolution: data.resolution },
-  });
-
-  // Notificar a las partes
-  const request = await prisma.service_request.findUnique({
-    where: { id: dispute.request_id },
-    include: {
-      provider: { include: { user: true } },
-    },
-  });
-
-  if (request) {
-    const notifications = [
-      {
-        id: ulid(),
-        user_id: request.customer_id,
-        kind: "dispute_resolved",
-        title: "Disputa resuelta",
-        body: `La disputa fue resuelta a favor de ${data.status === "resolved_customer" ? "tu solicitud" : "el proveedor"}.`,
-        meta: { disputeId, status: data.status },
+  // El UPDATE condicional evita que dos resoluciones se sobrescriban.
+  const resolved = await prisma.$transaction(async (tx) => {
+    const changed = await tx.dispute.updateMany({
+      where: { id: disputeId, status: "open" },
+      data: {
+        status: data.status,
+        resolved_by: admin.id,
+        resolution: data.resolution,
       },
-    ];
+    });
+    if (changed.count !== 1) throw AppError.conflict("Esta disputa ya fue resuelta");
+    const resolved = await tx.dispute.findUniqueOrThrow({ where: { id: disputeId }, include: { request: true } });
 
-    // Solo notificar al proveedor si existe
-    if (request.provider) {
-      notifications.push({
-        id: ulid(),
-        user_id: request.provider.user_id,
-        kind: "dispute_resolved",
-        title: "Disputa resuelta",
-        body: `La disputa fue resuelta a favor de ${data.status === "resolved_provider" ? "tu trabajo" : "el cliente"}.`,
-        meta: { disputeId, status: data.status },
+    // Auditoría
+    await audit(tx, {
+      id: admin.id,
+      name: admin.name,
+      adminRole: c.get("adminRole") || "moderator",
+    }, {
+      action: "DISPUTE_RESOLVED",
+      entityType: "dispute",
+      entityId: disputeId,
+      metadata: { status: data.status, resolution: data.resolution },
+    });
+
+    // Notificar a las partes
+    const request = await tx.service_request.findUnique({
+      where: { id: dispute.request_id },
+      include: {
+        provider: { select: { user_id: true } },
+      },
+    });
+
+    if (request) {
+      const notifications = [
+        {
+          id: ulid(),
+          user_id: request.customer_id,
+          kind: "dispute_resolved",
+          title: "Disputa resuelta",
+          body: `La disputa fue resuelta a favor de ${data.status === "resolved_customer" ? "tu solicitud" : "el proveedor"}.`,
+          meta: { disputeId, status: data.status },
+        },
+      ];
+
+      // Solo notificar al proveedor si existe
+      if (request.provider) {
+        notifications.push({
+          id: ulid(),
+          user_id: request.provider.user_id,
+          kind: "dispute_resolved",
+          title: "Disputa resuelta",
+          body: `La disputa fue resuelta a favor de ${data.status === "resolved_provider" ? "tu trabajo" : "el cliente"}.`,
+          meta: { disputeId, status: data.status },
+        });
+      }
+
+      await tx.notification.createMany({
+        data: notifications,
       });
     }
-
-    await prisma.notification.createMany({
-      data: notifications,
-    });
-  }
+    return resolved;
+  });
 
   return c.json(ok(resolved));
 });

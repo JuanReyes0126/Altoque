@@ -77,6 +77,7 @@ const d = describe.runIf(HAS_DB)("Claim atómico · integración aislada", () =>
         user_id: u.id,
         verification_status: "verified",
         referral_code: `T-${ulid()}`,
+        provider_zone: { create: { zone_id: zoneId } },
       },
     });
     providerIds.push(p.id);
@@ -257,7 +258,7 @@ const d = describe.runIf(HAS_DB)("Claim atómico · integración aislada", () =>
       await prisma.service_request.update({ where: { id: active.id }, data: { status } });
       await expect(claimRequest(prisma, {
         requestId: waiting.id, providerUserId: pro.user.id, etaMin: 20,
-      })).rejects.toMatchObject({ code: "P2002" });
+      })).rejects.toMatchObject({ code: "CONFLICT", status: 409 });
       const unchanged = await prisma.service_request.findUniqueOrThrow({ where: { id: waiting.id } });
       expect(unchanged.status).toBe("searching");
       expect(unchanged.provider_id).toBeNull();

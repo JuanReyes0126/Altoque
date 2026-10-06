@@ -405,10 +405,11 @@ export const api = {
     },
 
     /** GET /api/v1/disputes - Listar disputas propias */
-    list: async (params?: { page?: number; limit?: number }) => {
+    list: async (params?: { page?: number; limit?: number; requestId?: string }) => {
       const query = new URLSearchParams();
       if (params?.page) query.set("page", String(params.page));
       if (params?.limit) query.set("limit", String(params.limit));
+      if (params?.requestId) query.set("request_id", params.requestId);
       const qs = query.toString();
       const res = await http<{ data: any[]; meta: any }>(`/api/v1/disputes${qs ? "?" + qs : ""}`);
       return res;

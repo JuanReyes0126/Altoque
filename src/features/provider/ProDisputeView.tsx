@@ -7,7 +7,7 @@ interface Dispute {
   request_id: string;
   opened_by: string;
   reason: string;
-  status: "open" | "resolved_customer" | "resolved_provider";
+  status: "open" | "resolved_customer" | "resolved_provider" | "dismissed";
   resolved_by?: string;
   resolution?: string;
   created_at: string;
@@ -31,26 +31,27 @@ export function ProDisputeView({ requestId, onDisputeExists }: ProDisputeViewPro
   const [dispute, setDispute] = useState<Dispute | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
-    const loadDispute = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const res = await api.disputes.list();
-        const found = res.data.find((d: Dispute) => d.request_id === requestId);
-        setDispute(found || null);
+    let alive = true;
+    setLoading(true); setError(null);
+    onDisputeExists?.(true); // No habilitar apertura mientras el estado es desconocido.
+    api.disputes.list({ requestId, limit: 1 })
+      .then((result) => {
+        if (!alive) return;
+        const found = result.data[0] as Dispute | undefined;
+        setDispute(found ?? null);
         onDisputeExists?.(!!found);
-      } catch (err) {
-        setError("No se pudo cargar la información de la disputa");
-        onDisputeExists?.(false);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadDispute();
-  }, [requestId]);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setError("No se pudo cargar la información de la disputa.");
+        onDisputeExists?.(true);
+      })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [requestId, onDisputeExists, reload]);
 
   if (loading) {
     return (
@@ -66,11 +67,11 @@ export function ProDisputeView({ requestId, onDisputeExists }: ProDisputeViewPro
     );
   }
 
-  if (error || !dispute) {
-    return null;
-  }
+  if (error) return <section role="alert" className="card p-5 mt-4"><p>{error}</p><button onClick={() => setReload((value) => value + 1)} className="btn-ghost h-11 px-4 mt-3">Reintentar</button></section>;
+  if (!dispute) return null;
 
   const statusConfig = {
+    dismissed: { label: "Descartada", color: "bg-tint text-mut", icon: "x" },
     open: { label: "Abierta", color: "bg-sunsoft text-sun2", icon: "alert" },
     resolved_customer: { label: "Resuelta a favor del cliente", color: "bg-oksoft text-ok", icon: "check" },
     resolved_provider: { label: "Resuelta a tu favor", color: "bg-pinesoft text-pine", icon: "check" },

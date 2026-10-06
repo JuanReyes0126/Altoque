@@ -14,6 +14,7 @@ import { ok, page, pageMeta, parsePaging } from "../lib/envelope.js";
 import { AppError } from "../lib/errors.js";
 import { ulid, nextRequestCode } from "../lib/ids.js";
 import { consume, LIMITS } from "../lib/ratelimit.js";
+import { transitionRequest } from "../requests/transitions.js";
 
 export const requestRoutes = new Hono<AuthEnv>();
 
@@ -32,9 +33,9 @@ requestRoutes.post("/", requireAuth, requireVerifiedEmail, async (c) => {
     scheduled_at: z.string().datetime().optional(),
     address_id: z.string().optional(),
     photos: z.array(z.object({
-      blob_key: z.string(),
+      blob_key: z.string().min(1).max(512),
       sort: z.number().int().min(0),
-    })).optional(),
+    })).max(3).optional(),
   });
 
   const data = schema.parse(body);
@@ -74,6 +75,18 @@ requestRoutes.post("/", requireAuth, requireVerifiedEmail, async (c) => {
 
   // Crear solicitud en transacción
   const result = await prisma.$transaction(async (tx) => {
+    if (data.photos?.length) {
+      const keys = [...new Set(data.photos.map((photo) => photo.blob_key))];
+      if (keys.length !== data.photos.length) throw AppError.validation([{ path: "photos", message: "No repitas la misma foto" }]);
+      const files = await tx.file.findMany({
+        where: { blob_key: { in: keys }, owner_id: user.id, purpose: "request_photo", visibility: "private" },
+        select: { blob_key: true },
+      });
+      const owned = new Set(files.map((file) => file.blob_key));
+      if (keys.some((key) => !owned.has(key))) {
+        throw AppError.validation([{ path: "photos", message: "Las fotos deben proceder de tus propias cargas de solicitud" }]);
+      }
+    }
     const code = await nextRequestCode(tx);
     const id = ulid();
 
@@ -223,12 +236,9 @@ requestRoutes.post("/:id/cancel", requireAuth, requireVerifiedEmail, async (c) =
 
   // Cancelar en transacción
   await prisma.$transaction(async (tx) => {
-    await tx.service_request.update({
-      where: { id },
-      data: {
-        status: "cancelled",
-        completed_at: new Date(),
-      },
+    await transitionRequest(tx, {
+      id, from: request.status, to: "cancelled", where: { customer_id: user.id, provider_id: request.provider_id },
+      data: { completed_at: new Date() },
     });
 
     await tx.request_status_history.create({
@@ -271,12 +281,9 @@ requestRoutes.post("/:id/confirm", requireAuth, requireVerifiedEmail, async (c) 
 
   // Confirmar en transacción
   await prisma.$transaction(async (tx) => {
-    await tx.service_request.update({
-      where: { id },
-      data: {
-        status: "confirmed",
-        confirmed_at: new Date(),
-      },
+    await transitionRequest(tx, {
+      id, from: "completed", to: "confirmed", where: { customer_id: user.id, provider_id: request.provider_id },
+      data: { confirmed_at: new Date() },
     });
 
     await tx.request_status_history.create({
@@ -341,6 +348,9 @@ requestRoutes.post("/:id/review", requireAuth, requireVerifiedEmail, async (c) =
 
   // Crear review en transacción
   await prisma.$transaction(async (tx) => {
+    await transitionRequest(tx, {
+      id, from: "confirmed", to: "reviewed", where: { customer_id: user.id, provider_id: request.provider_id },
+    });
     await tx.review.create({
       data: {
         id: ulid(),
@@ -353,11 +363,6 @@ requestRoutes.post("/:id/review", requireAuth, requireVerifiedEmail, async (c) =
         communication: data.communication,
         comment: data.comment,
       },
-    });
-
-    await tx.service_request.update({
-      where: { id },
-      data: { status: "reviewed" },
     });
 
     await tx.request_status_history.create({

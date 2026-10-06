@@ -18,6 +18,7 @@ import { ulid } from "../lib/ids.js";
 import { createWithReferralCode } from "../lib/referrals.js";
 import { consume, LIMITS } from "../lib/ratelimit.js";
 import { claimRequest } from "../requests/claimRequest.js";
+import { transitionRequest } from "../requests/transitions.js";
 
 export const providerRoutes = new Hono<AuthEnv>();
 
@@ -55,8 +56,8 @@ providerRoutes.post("/me", requireAuth, requireVerifiedEmail, async (c) => {
     business_name: z.string().max(100).optional(),
     bio: z.string().max(600).optional(),
     years_exp: z.number().int().min(0).max(50).optional(),
-    category_ids: z.array(z.string()).min(1),
-    zone_ids: z.array(z.string()).min(1),
+    category_ids: z.array(z.string().min(1)).min(1).max(100).refine((ids) => new Set(ids).size === ids.length, "No repitas servicios"),
+    zone_ids: z.array(z.string().min(1)).min(1).max(100).refine((ids) => new Set(ids).size === ids.length, "No repitas zonas"),
   });
 
   const data = schema.parse(body);
@@ -72,6 +73,13 @@ providerRoutes.post("/me", requireAuth, requireVerifiedEmail, async (c) => {
 
   // Cada colisión de referido reintenta toda la operación en una transacción nueva.
   const provider = await createWithReferralCode((code) => prisma.$transaction(async (tx) => {
+    const [categories, zones] = await Promise.all([
+      tx.category.count({ where: { id: { in: data.category_ids }, is_active: true } }),
+      tx.zone.count({ where: { id: { in: data.zone_ids }, is_active: true } }),
+    ]);
+    if (categories !== data.category_ids.length || zones !== data.zone_ids.length) {
+      throw AppError.validation([{ path: "category_ids", message: "Selecciona servicios y zonas disponibles" }]);
+    }
     const newProvider = await tx.provider_profile.create({
       data: {
         id: ulid(),
@@ -122,11 +130,10 @@ providerRoutes.patch("/me", requireAuth, requireVerifiedEmail, async (c) => {
 
   const data = schema.parse(body);
 
-  const provider = await prisma.provider_profile.update({
-    where: { user_id: user.id },
-    data: {
-      ...data,
-    },
+  const provider = await prisma.$transaction(async (tx) => {
+    const changed = await tx.provider_profile.updateMany({ where: { user_id: user.id }, data });
+    if (changed.count !== 1) throw AppError.notFound("Perfil de proveedor");
+    return tx.provider_profile.findUniqueOrThrow({ where: { user_id: user.id } });
   });
 
   return c.json(ok(provider));
@@ -156,12 +163,13 @@ providerRoutes.patch("/availability", requireAuth, requireVerifiedEmail, async (
     throw AppError.forbidden("Solo proveedores verificados pueden cambiar disponibilidad");
   }
 
-  const updated = await prisma.provider_profile.update({
-    where: { user_id: user.id },
-    data: {
-      is_available: data.is_available,
-      available_since: data.is_available ? new Date() : null,
-    },
+  const updated = await prisma.$transaction(async (tx) => {
+    const changed = await tx.provider_profile.updateMany({
+      where: { user_id: user.id, verification_status: "verified" },
+      data: { is_available: data.is_available, available_since: data.is_available ? new Date() : null },
+    });
+    if (changed.count !== 1) throw AppError.forbidden("Tu perfil cambió. Recarga antes de cambiar disponibilidad.");
+    return tx.provider_profile.findUniqueOrThrow({ where: { user_id: user.id } });
   });
 
   return c.json(ok({ is_available: updated.is_available }));
@@ -212,7 +220,7 @@ providerRoutes.get("/inbox", requireAuth, requireVerifiedEmail, async (c) => {
         category: true,
         zone: true,
         customer: {
-          select: { id: true, name: true, email: true },
+          select: { id: true, name: true },
         },
         request_photo: {
           orderBy: { sort: "asc" },
@@ -295,12 +303,9 @@ providerRoutes.post("/requests/:id/status", requireAuth, requireVerifiedEmail, a
 
   // Actualizar estado en transacción
   await prisma.$transaction(async (tx) => {
-    await tx.service_request.update({
-      where: { id: requestId },
-      data: {
-        status: data.status as any,
-        completed_at: data.status === "completed" ? new Date() : undefined,
-      },
+    await transitionRequest(tx, {
+      id: requestId, from: request.status, to: data.status, where: { provider_id: provider.id },
+      data: { completed_at: data.status === "completed" ? new Date() : undefined },
     });
 
     await tx.request_status_history.create({
