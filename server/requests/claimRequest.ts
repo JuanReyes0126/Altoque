@@ -82,41 +82,55 @@ export async function claimRequestInTx(tx: PrismaClient | Tx, args: ClaimArgs): 
 }
 
 /**
- * Claim completo con validaciones pre-transacción:
+ * Claim completo con validaciones y bloqueos de elegibilidad en la misma transacción:
  *  - el provider existe y está VERIFIED (unverified no puede reclamar)
  *  - la solicitud existe, pertenece a otro cliente y coincide con categoría/zona
  * La autorización final la da la fila: quien no cumpla el WHERE del
  * UPDATE no gana, aunque dos requests lleguen en el mismo milisegundo.
  */
 export async function claimRequest(db: PrismaClient, input: { requestId: string; providerUserId: string; etaMin: number }): Promise<ClaimResult> {
-  const provider = await db.provider_profile.findUnique({ where: { user_id: input.providerUserId } });
-  if (!provider) throw AppError.forbidden("Perfil de proveedor no encontrado");
-  if (provider.verification_status !== "verified") {
-    throw new AppError("FORBIDDEN", "Solo los proveedores verificados pueden aceptar solicitudes", 403);
-  }
-
-  const req = await db.service_request.findUnique({
-    where: { id: input.requestId },
-    select: { id: true, category_id: true, zone_id: true, customer_id: true },
-  });
-  if (!req) throw AppError.notFound("Solicitud");
-  if (req.customer_id === input.providerUserId) throw AppError.forbidden("No puedes aceptar tu propia solicitud");
-
-  const offers = await db.provider_service.findUnique({
-    where: { provider_id_category_id: { provider_id: provider.id, category_id: req.category_id } },
-  });
-  if (!offers) throw AppError.forbidden("No ofreces esta categoría");
-  const coversZone = await db.provider_zone.findUnique({
-    where: { provider_id_zone_id: { provider_id: provider.id, zone_id: req.zone_id } },
-  });
-  if (!coversZone) throw AppError.forbidden("No trabajas en esta zona");
-
   // La disponibilidad expresa recepción de solicitudes; no cambia la capacidad
   // de aceptar una ya visible. Categoría, zona y aprobación sí son requisitos.
   try {
-    return await db.$transaction((tx) => claimRequestInTx(tx, {
-      requestId: input.requestId, providerProfileId: provider.id, actorUserId: input.providerUserId, etaMin: input.etaMin,
-    }));
+    return await db.$transaction(async (tx) => {
+      // Orden profile → user → service → zone, compatible con aprobación admin.
+      // FOR SHARE, no KEY SHARE: UPDATE/DELETE de elegibilidad espera al COMMIT.
+      const [provider] = await tx.$queryRaw<{ id: string; verification_status: string }[]>`
+        SELECT id, verification_status FROM provider_profile WHERE user_id = ${input.providerUserId} FOR SHARE
+      `;
+      if (!provider) throw AppError.forbidden("Perfil de proveedor no encontrado");
+      if (provider.verification_status !== "verified") {
+        throw AppError.forbidden("Solo los proveedores verificados pueden aceptar solicitudes");
+      }
+      const [actor] = await tx.$queryRaw<{ status: string; emailVerified: boolean }[]>`
+        SELECT status, "emailVerified" FROM "user" WHERE id = ${input.providerUserId} FOR SHARE
+      `;
+      if (!actor || actor.status !== "active" || !actor.emailVerified) {
+        throw AppError.forbidden("La cuenta no puede aceptar solicitudes");
+      }
+
+      const req = await tx.service_request.findUnique({
+        where: { id: input.requestId },
+        select: { id: true, category_id: true, zone_id: true, customer_id: true },
+      });
+      if (!req) throw AppError.notFound("Solicitud");
+      if (req.customer_id === input.providerUserId) throw AppError.forbidden("No puedes aceptar tu propia solicitud");
+
+      const offers = await tx.$queryRaw<{ provider_id: string }[]>`
+        SELECT provider_id FROM provider_service
+        WHERE provider_id = ${provider.id} AND category_id = ${req.category_id} FOR SHARE
+      `;
+      if (!offers.length) throw AppError.forbidden("No ofreces esta categoría");
+      const zones = await tx.$queryRaw<{ provider_id: string }[]>`
+        SELECT provider_id FROM provider_zone
+        WHERE provider_id = ${provider.id} AND zone_id = ${req.zone_id} FOR SHARE
+      `;
+      if (!zones.length) throw AppError.forbidden("No trabajas en esta zona");
+
+      return claimRequestInTx(tx, {
+        requestId: input.requestId, providerProfileId: provider.id, actorUserId: input.providerUserId, etaMin: input.etaMin,
+      });
+    });
   } catch (error) {
     const target = error instanceof Prisma.PrismaClientKnownRequestError ? error.meta?.target : undefined;
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002" &&

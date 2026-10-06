@@ -139,5 +139,124 @@ describe.runIf(HAS_DB)("Backend · estabilización de inputs, altas y elegibilid
     expect(await response.json()).toEqual({ data: [], meta: { page: 1, limit: 20, total: 0, pages: 1 } });
   });
 
+  const revocations = ["account", "email", "profile", "category", "zone"] as const;
+  async function revoke(kind: typeof revocations[number], providerId: string) {
+    if (kind === "account") await prisma.user.update({ where: { id: users.provider }, data: { status: "blocked" } });
+    else if (kind === "email") await prisma.user.update({ where: { id: users.provider }, data: { emailVerified: false } });
+    else if (kind === "profile") await prisma.provider_profile.update({ where: { id: providerId }, data: { verification_status: "suspended" } });
+    else if (kind === "category") await prisma.provider_service.deleteMany({ where: { provider_id: providerId } });
+    else await prisma.provider_zone.deleteMany({ where: { provider_id: providerId } });
+  }
+  it.each(revocations)("revocar %s antes de la transacción impide el claim sin efectos parciales", async (kind) => {
+    const provider = await makeProvider();
+    const request = await makeRequest();
+    const transaction = prisma.$transaction.bind(prisma);
+    const database = new Proxy(prisma, {
+      get(target, property) {
+        if (property === "$transaction") return async (callback: (tx: Tx) => Promise<unknown>) => {
+          await revoke(kind, provider.id);
+          return transaction(callback);
+        };
+        return target[property as keyof PrismaClient];
+      },
+    });
+    await expect(claimRequest(database, { requestId: request.id, providerUserId: users.provider, etaMin: 15 })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(await prisma.service_request.findUniqueOrThrow({ where: { id: request.id } })).toMatchObject({ status: "searching", provider_id: null });
+    expect(await prisma.request_status_history.count({ where: { request_id: request.id } })).toBe(0);
+    expect(await prisma.notification.count({ where: { user_id: users.customer } })).toBe(0);
+  });
 
+  it.each(["account", "profile", "category", "zone"] as const)("el lock de %s conserva elegibilidad hasta COMMIT y serializa la revocación", async (kind) => {
+    const provider = await makeProvider();
+    const request = await makeRequest();
+    let ready!: () => void, release!: () => void;
+    const locked = new Promise<void>((resolve) => { ready = resolve; });
+    const barrier = new Promise<void>((resolve) => { release = resolve; });
+    const transaction = prisma.$transaction.bind(prisma);
+    const database = new Proxy(prisma, {
+      get(target, property) {
+        if (property === "$transaction") return (callback: (tx: Tx) => Promise<unknown>) => transaction((tx) => callback(new Proxy(tx, {
+          get(targetTx, key) {
+            if (key === "service_request") return new Proxy(targetTx.service_request, {
+              get(delegate, operation) {
+                if (operation === "updateMany") return async (args: Parameters<typeof delegate.updateMany>[0]) => {
+                  ready();
+                  await barrier;
+                  return delegate.updateMany(args);
+                };
+                return delegate[operation as keyof typeof delegate];
+              },
+            });
+            return targetTx[key as keyof Tx];
+          },
+        })));
+        return target[property as keyof PrismaClient];
+      },
+    });
+    const claim = claimRequest(database, { requestId: request.id, providerUserId: users.provider, etaMin: 15 });
+    let committed = false;
+    let committedWhileLocked = false, waiting = false;
+    let revocation: Promise<void> | undefined;
+    try {
+      await Promise.race([locked, claim.then(() => { throw new Error("CLAIM_COMPLETED_BEFORE_TEST_BARRIER"); })]);
+      revocation = revoke(kind, provider.id).then(() => { committed = true; });
+      for (let attempt = 0; attempt < 100 && !waiting; attempt++) {
+        const rows = await prisma.$queryRaw<{ count: number }[]>`
+          SELECT count(*)::integer AS count FROM pg_stat_activity
+          WHERE datname = current_database() AND wait_event_type = 'Lock'
+        `;
+        waiting = rows[0].count > 0;
+        if (!waiting) await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      committedWhileLocked = committed;
+    } finally {
+      release();
+      // Incluso si falla una aserción, no dejar una transacción fixture ejecutándose durante cleanup.
+      await Promise.allSettled([claim, ...(revocation ? [revocation] : [])]);
+    }
+    expect(waiting).toBe(true);
+    expect(committedWhileLocked).toBe(false);
+    expect((await claim).status).toBe("accepted");
+    await revocation;
+    expect(committed).toBe(true);
+    const next = await makeRequest(users.other);
+    await expect(claimRequest(prisma, { requestId: next.id, providerUserId: users.provider, etaMin: 15 })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("claim y aprobación respetan profile→user y completan sin deadlock", async () => {
+    const provider = await makeProvider();
+    await prisma.provider_profile.update({ where: { id: provider.id }, data: { verification_status: "pending_verification" } });
+    const request = await makeRequest();
+    let ready!: () => void, release!: () => void;
+    const updated = new Promise<void>((resolve) => { ready = resolve; });
+    const barrier = new Promise<void>((resolve) => { release = resolve; });
+    // Mismo orden de escrituras que POST admin/providers/:id/approve.
+    const approval = prisma.$transaction(async (tx) => {
+      await tx.provider_profile.update({ where: { id: provider.id }, data: { verification_status: "verified" } });
+      ready();
+      await barrier;
+      await tx.user.updateMany({ where: { id: users.provider, role: { not: "admin" } }, data: { role: "provider" } });
+    });
+    let claim: ReturnType<typeof claimRequest> | undefined;
+    let waiting = false;
+    try {
+      await Promise.race([updated, approval.then(() => { throw new Error("APPROVAL_COMPLETED_BEFORE_TEST_BARRIER"); })]);
+      claim = claimRequest(prisma, { requestId: request.id, providerUserId: users.provider, etaMin: 15 });
+      for (let attempt = 0; attempt < 100 && !waiting; attempt++) {
+        const rows = await prisma.$queryRaw<{ count: number }[]>`
+          SELECT count(*)::integer AS count FROM pg_stat_activity
+          WHERE datname = current_database() AND wait_event_type = 'Lock'
+        `;
+        waiting = rows[0].count > 0;
+        if (!waiting) await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    } finally {
+      release();
+      await Promise.allSettled([approval, ...(claim ? [claim] : [])]);
+    }
+    expect(waiting).toBe(true);
+    await expect(approval).resolves.toBeUndefined();
+    await expect(claim).resolves.toMatchObject({ status: "accepted" });
+    expect(await prisma.user.findUniqueOrThrow({ where: { id: users.provider } })).toMatchObject({ role: "provider" });
+  });
 });
