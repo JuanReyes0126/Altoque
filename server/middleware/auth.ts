@@ -11,7 +11,7 @@ import { createMiddleware } from "hono/factory";
 import { auth } from "../auth/auth.js";
 import { prisma } from "../database/prisma.js";
 import { AppError } from "../lib/errors.js";
-import { hasAdminPermission, type AdminRole, type Permission } from "../lib/permissions.js";
+import { hasAdminPermission, SENSITIVE_OPERATIONS, type AdminRole, type Permission } from "../lib/permissions.js";
 
 export interface AuthUser {
   id: string;
@@ -23,7 +23,7 @@ export interface AuthUser {
 }
 
 export interface AuthSessionCtx {
-  session: { id: string; userId: string; expiresAt: Date };
+  session: { id: string; userId: string; expiresAt: Date; createdAt: Date };
   user: AuthUser;
 }
 
@@ -80,6 +80,13 @@ export function requirePermission(permission: Permission) {
       c.set("adminRole", adminRole);
     }
     if (!adminRole || !hasAdminPermission(adminRole, permission)) throw AppError.forbidden();
+    if (SENSITIVE_OPERATIONS.includes(permission)) {
+      const { sessionConfig } = await auth.$context;
+      const createdAt = new Date(c.get("auth").session.createdAt).getTime();
+      if (!Number.isFinite(createdAt) || (sessionConfig.freshAge !== 0 && Date.now() - createdAt >= sessionConfig.freshAge * 1000)) {
+        throw AppError.forbidden("Vuelve a iniciar sesión antes de realizar esta operación sensible");
+      }
+    }
     await next();
   });
 }

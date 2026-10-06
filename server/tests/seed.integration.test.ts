@@ -8,6 +8,7 @@ import { ulid } from "../lib/ids.js";
 import { HAS_DB } from "./setup";
 import { managedTestDatabase } from "./test-database.js";
 import { testHeaders } from "./session-helpers.js";
+import { emailLimitSubject } from "../auth/rate-limit.js";
 
 describe.runIf(HAS_DB)("Seed · integración aislada", () => {
   const email = `seed-regression-${ulid()}@test.altoque.do`.toLowerCase();
@@ -114,6 +115,7 @@ describe.runIf(HAS_DB)("Seed · integración aislada", () => {
     const userIds = users.map(({ id }) => id);
     await prisma.admin_audit_log.deleteMany({ where: { actor_id: { in: userIds } } });
     await prisma.notification.deleteMany({ where: { user_id: { in: userIds } } });
+    await prisma.rate_limit.deleteMany({ where: { subject: emailLimitSubject(email, (await auth.$context).secret) } });
     // account, session y admin_profile usan onDelete: Cascade.
     await prisma.user.deleteMany({ where: { id: { in: userIds } } });
     await prisma.category.deleteMany({ where: { id: { in: categoryIds } } });

@@ -11,6 +11,7 @@
  */
 import { Hono } from "hono";
 import { z } from "zod";
+import { AccountStatus, ProviderVerificationStatus, RequestStatus, UserRole } from "@prisma/client";
 import { prisma } from "../database/prisma.js";
 import { requireAuth, requireVerifiedEmail, requirePermission, type AuthEnv } from "../middleware/auth.js";
 import { ok, page, pageMeta, parsePaging } from "../lib/envelope.js";
@@ -64,8 +65,8 @@ adminRoutes.get("/metrics", requireAuth, requireVerifiedEmail, requirePermission
 // Listar usuarios con filtros y paginación
 adminRoutes.get("/users", requireAuth, requireVerifiedEmail, requirePermission("users.read"), async (c) => {
   const { page: pageNum, limit, skip } = parsePaging(c.req.query());
-  const role = c.req.query("role");
-  const status = c.req.query("status");
+  const role = z.nativeEnum(UserRole).optional().parse(c.req.query("role"));
+  const status = z.nativeEnum(AccountStatus).optional().parse(c.req.query("status"));
   const search = c.req.query("q");
 
   const where: any = {};
@@ -105,7 +106,7 @@ adminRoutes.get("/users", requireAuth, requireVerifiedEmail, requirePermission("
 adminRoutes.post("/users/:id/suspend", requireAuth, requireVerifiedEmail, requirePermission("users.suspend"), async (c) => {
   const { user: admin } = c.get("auth");
   const userId = c.req.param("id");
-  const body = await c.req.json();
+  const body = await c.req.json().catch(() => { throw AppError.validation(); });
 
   const schema = z.object({
     reason: z.string().max(500).optional(),
@@ -113,20 +114,16 @@ adminRoutes.post("/users/:id/suspend", requireAuth, requireVerifiedEmail, requir
 
   const data = schema.parse(body);
 
-  const user = await prisma.user.update({
-    where: { id: userId },
-    data: { status: "suspended" },
-  });
-
-  await audit(prisma, {
-    id: admin.id,
-    name: admin.name,
-    adminRole: c.get("adminRole") || "admin",
-  }, {
-    action: "USER_SUSPENDED",
-    entityType: "user",
-    entityId: userId,
-    metadata: { reason: data.reason },
+  await prisma.$transaction(async (tx) => {
+    const target = await tx.user.findUnique({ where: { id: userId }, select: { role: true, admin_profile: { select: { user_id: true } } } });
+    if (!target) throw AppError.notFound("Usuario");
+    // Los endpoints genéricos no gestionan administradores ni el propio acceso.
+    // Esto protege jerarquía y último super_admin incluso ante concurrencia.
+    if (userId === admin.id || target.role === "admin" || target.admin_profile) throw AppError.forbidden("Las cuentas administrativas requieren una operación separada de gestión de administradores");
+    if ((await tx.user.updateMany({ where: { id: userId, role: { not: "admin" }, admin_profile: { is: null } }, data: { status: "suspended" } })).count !== 1) throw AppError.conflict("La cuenta cambió; recarga antes de continuar");
+    await audit(tx, { id: admin.id, name: admin.name, adminRole: c.get("adminRole")! }, {
+      action: "USER_SUSPENDED", entityType: "user", entityId: userId, metadata: { reason: data.reason },
+    });
   });
 
   return c.json(ok({ message: "Usuario suspendido" }));
@@ -137,7 +134,7 @@ adminRoutes.post("/users/:id/suspend", requireAuth, requireVerifiedEmail, requir
 adminRoutes.post("/users/:id/block", requireAuth, requireVerifiedEmail, requirePermission("users.block"), async (c) => {
   const { user: admin } = c.get("auth");
   const userId = c.req.param("id");
-  const body = await c.req.json();
+  const body = await c.req.json().catch(() => { throw AppError.validation(); });
 
   const schema = z.object({
     reason: z.string().max(500).optional(),
@@ -145,20 +142,14 @@ adminRoutes.post("/users/:id/block", requireAuth, requireVerifiedEmail, requireP
 
   const data = schema.parse(body);
 
-  const user = await prisma.user.update({
-    where: { id: userId },
-    data: { status: "blocked" },
-  });
-
-  await audit(prisma, {
-    id: admin.id,
-    name: admin.name,
-    adminRole: c.get("adminRole") || "admin",
-  }, {
-    action: "USER_BLOCKED",
-    entityType: "user",
-    entityId: userId,
-    metadata: { reason: data.reason },
+  await prisma.$transaction(async (tx) => {
+    const target = await tx.user.findUnique({ where: { id: userId }, select: { role: true, admin_profile: { select: { user_id: true } } } });
+    if (!target) throw AppError.notFound("Usuario");
+    if (userId === admin.id || target.role === "admin" || target.admin_profile) throw AppError.forbidden("Las cuentas administrativas requieren una operación separada de gestión de administradores");
+    if ((await tx.user.updateMany({ where: { id: userId, role: { not: "admin" }, admin_profile: { is: null } }, data: { status: "blocked" } })).count !== 1) throw AppError.conflict("La cuenta cambió; recarga antes de continuar");
+    await audit(tx, { id: admin.id, name: admin.name, adminRole: c.get("adminRole")! }, {
+      action: "USER_BLOCKED", entityType: "user", entityId: userId, metadata: { reason: data.reason },
+    });
   });
 
   return c.json(ok({ message: "Usuario bloqueado" }));
@@ -168,7 +159,7 @@ adminRoutes.post("/users/:id/block", requireAuth, requireVerifiedEmail, requireP
 // Listar proveedores con filtros
 adminRoutes.get("/providers", requireAuth, requireVerifiedEmail, requirePermission("providers.verify"), async (c) => {
   const { page: pageNum, limit, skip } = parsePaging(c.req.query());
-  const status = c.req.query("status");
+  const status = z.nativeEnum(ProviderVerificationStatus).optional().parse(c.req.query("status"));
 
   const where: any = {};
   if (status) where.verification_status = status;
@@ -203,39 +194,25 @@ adminRoutes.post("/providers/:id/approve", requireAuth, requireVerifiedEmail, re
   const { user: admin } = c.get("auth");
   const providerId = c.req.param("id");
 
-  const provider = await prisma.provider_profile.update({
-    where: { id: providerId },
-    data: {
-      verification_status: "verified",
-    },
-    include: { user: true },
-  });
-
-  // Actualizar rol del usuario a provider
-  await prisma.user.update({
-    where: { id: provider.user_id },
-    data: { role: "provider" },
-  });
-
-  await audit(prisma, {
-    id: admin.id,
-    name: admin.name,
-    adminRole: c.get("adminRole") || "admin",
-  }, {
-    action: "PROVIDER_APPROVED",
-    entityType: "provider",
-    entityId: providerId,
-  });
-
-  await prisma.provider_verification_history.create({
-    data: {
-      id: ulid(),
-      provider_id: providerId,
-      from_status: "pending_verification",
-      to_status: "verified",
-      actor_id: admin.id,
-      reason: "Aprobado por administrador",
-    },
+  await prisma.$transaction(async (tx) => {
+    const provider = await tx.provider_profile.findUnique({ where: { id: providerId }, select: { user_id: true, verification_status: true } });
+    if (!provider) throw AppError.notFound("Proveedor");
+    if (provider.verification_status === "verified") return; // Repetición idempotente.
+    if (provider.verification_status !== "pending_verification") throw AppError.conflict("El proveedor no está pendiente de verificación");
+    const updated = await tx.provider_profile.updateMany({ where: { id: providerId, verification_status: "pending_verification" }, data: { verification_status: "verified" } });
+    if (updated.count !== 1) {
+      if ((await tx.provider_profile.findUnique({ where: { id: providerId }, select: { verification_status: true } }))?.verification_status === "verified") return;
+      throw AppError.conflict("El estado del proveedor cambió; recarga antes de continuar");
+    }
+    // El modo profesional es una capacidad: nunca elimina privilegios admin.
+    await tx.user.updateMany({ where: { id: provider.user_id, role: { not: "admin" } }, data: { role: "provider" } });
+    await audit(tx, { id: admin.id, name: admin.name, adminRole: c.get("adminRole")! }, {
+      action: "PROVIDER_APPROVED", entityType: "provider", entityId: providerId,
+    });
+    await tx.provider_verification_history.create({ data: {
+      id: ulid(), provider_id: providerId, from_status: provider.verification_status,
+      to_status: "verified", actor_id: admin.id, reason: "Aprobado por administrador",
+    } });
   });
 
   return c.json(ok({ message: "Proveedor aprobado" }));
@@ -246,41 +223,31 @@ adminRoutes.post("/providers/:id/approve", requireAuth, requireVerifiedEmail, re
 adminRoutes.post("/providers/:id/reject", requireAuth, requireVerifiedEmail, requirePermission("providers.verify"), async (c) => {
   const { user: admin } = c.get("auth");
   const providerId = c.req.param("id");
-  const body = await c.req.json();
+  const body = await c.req.json().catch(() => { throw AppError.validation(); });
 
   const schema = z.object({
-    reason: z.string().max(500),
+    reason: z.string().trim().min(1).max(500),
   });
 
   const data = schema.parse(body);
 
-  const provider = await prisma.provider_profile.update({
-    where: { id: providerId },
-    data: {
-      verification_status: "rejected",
-    },
-  });
-
-  await audit(prisma, {
-    id: admin.id,
-    name: admin.name,
-    adminRole: c.get("adminRole") || "admin",
-  }, {
-    action: "PROVIDER_REJECTED",
-    entityType: "provider",
-    entityId: providerId,
-    metadata: { reason: data.reason },
-  });
-
-  await prisma.provider_verification_history.create({
-    data: {
-      id: ulid(),
-      provider_id: providerId,
-      from_status: "pending_verification",
-      to_status: "rejected",
-      actor_id: admin.id,
-      reason: data.reason,
-    },
+  await prisma.$transaction(async (tx) => {
+    const provider = await tx.provider_profile.findUnique({ where: { id: providerId }, select: { verification_status: true } });
+    if (!provider) throw AppError.notFound("Proveedor");
+    if (provider.verification_status === "rejected") return;
+    if (provider.verification_status !== "pending_verification") throw AppError.conflict("El proveedor no está pendiente de verificación");
+    const updated = await tx.provider_profile.updateMany({ where: { id: providerId, verification_status: "pending_verification" }, data: { verification_status: "rejected", is_available: false } });
+    if (updated.count !== 1) {
+      if ((await tx.provider_profile.findUnique({ where: { id: providerId }, select: { verification_status: true } }))?.verification_status === "rejected") return;
+      throw AppError.conflict("El estado del proveedor cambió; recarga antes de continuar");
+    }
+    await audit(tx, { id: admin.id, name: admin.name, adminRole: c.get("adminRole")! }, {
+      action: "PROVIDER_REJECTED", entityType: "provider", entityId: providerId, metadata: { reason: data.reason },
+    });
+    await tx.provider_verification_history.create({ data: {
+      id: ulid(), provider_id: providerId, from_status: provider.verification_status,
+      to_status: "rejected", actor_id: admin.id, reason: data.reason,
+    } });
   });
 
   return c.json(ok({ message: "Proveedor rechazado" }));
@@ -290,7 +257,7 @@ adminRoutes.post("/providers/:id/reject", requireAuth, requireVerifiedEmail, req
 // Listar todas las solicitudes
 adminRoutes.get("/requests", requireAuth, requireVerifiedEmail, requirePermission("requests.read"), async (c) => {
   const { page: pageNum, limit, skip } = parsePaging(c.req.query());
-  const status = c.req.query("status");
+  const status = z.nativeEnum(RequestStatus).optional().parse(c.req.query("status"));
 
   const where: any = {};
   if (status) where.status = status;

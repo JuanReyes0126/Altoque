@@ -1,8 +1,10 @@
 /**
  * ALTOQUE · Seed idempotente (F1.1)
  *
- * Ejecución:  npx tsx --env-file=.env server/database/seeds/seed.ts
- * Requiere:   DATABASE_URL (rama DEV de Neon — jamás Production)
+ * Ejecución local explícita: node --env-file=.env --import=tsx
+ *   server/database/seeds/seed.ts --apply
+ * Requiere: DATABASE_URL de altoque_dev en 127.0.0.1, o runner aislado.
+ * El catálogo nunca se siembra sobre una base remota.
  *
  * Idempotente: todo se inserta con `upsert` sobre IDs estables.
  * El super admin solo se crea si SEED_ADMIN_EMAIL y SEED_ADMIN_PASSWORD
@@ -10,11 +12,10 @@
  * Better Auth (scrypt vía better-auth/crypto).
  */
 import { PrismaClient } from "@prisma/client";
-import { hashPassword } from "better-auth/crypto";
-import { createLocalAccountIssuer } from "better-auth/db";
-import { ulid } from "../../lib/ids.js";
+import { adminCredentials, bootstrapAdmin } from "./admin.js";
+import { assertSeedIdentity, seedTarget } from "./safety.js";
 
-const prisma = new PrismaClient();
+let prisma: PrismaClient | undefined;
 
 const CATEGORIES = [
   { id: "plomeria", name: "Plomería", icon: "wrench", group_name: "Hogar", sort: 1 },
@@ -54,8 +55,10 @@ const ZONES = [
 ];
 
 async function main() {
-  const branch = process.env.DATABASE_URL ?? "";
-  if (!branch) throw new Error("DATABASE_URL no definida. El seed solo corre contra la rama DEV de Neon.");
+  const target = seedTarget(process.env, { apply: process.argv.slice(2).includes("--apply") });
+  const credentials = adminCredentials(process.env, true);
+  prisma = new PrismaClient({ datasourceUrl: target.url, log: [] });
+  await assertSeedIdentity(prisma, target);
 
   console.log("→ Sembrando categorías…");
   for (const c of CATEGORIES) {
@@ -82,37 +85,9 @@ async function main() {
     create: { id: 1, last_value: 0 },
   });
 
-  const email = process.env.SEED_ADMIN_EMAIL;
-  const password = process.env.SEED_ADMIN_PASSWORD;
-  if (email && password) {
-    console.log(`→ Creando super admin (${email})…`);
-    const existing = await prisma.user.findUnique({ where: { email } });
-    if (!existing) {
-      const hashed = await hashPassword(password);
-      const userId = ulid();
-      const user = await prisma.user.create({
-        data: {
-          id: userId,
-          name: "Admin Altoque",
-          email,
-          emailVerified: true,
-          role: "admin",
-          status: "active",
-          account: {
-            create: {
-              accountId: userId,
-              providerId: "credential",
-              issuer: createLocalAccountIssuer("credential"),
-              password: hashed,
-            },
-          },
-          admin_profile: { create: { admin_role: "super_admin" } },
-        },
-      });
-      console.log(`  ✓ user ${user.id} · role=admin · admin_role=super_admin`);
-    } else {
-      console.log("  ✓ ya existe, se omite");
-    }
+  if (credentials) {
+    const result = await bootstrapAdmin(prisma, credentials);
+    console.log(result === "created" ? "ADMIN_CREATED" : "ADMIN_ALREADY_PROVISIONED_PASSWORD_UNCHANGED");
   } else {
     console.log("→ SEED_ADMIN_EMAIL/SEED_ADMIN_PASSWORD no definidas: se omite el super admin.");
   }
@@ -121,8 +96,11 @@ async function main() {
 }
 
 main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
+  .catch((error) => {
+    const message = error instanceof Error ? error.message : "";
+    console.error(/^(?:ADMIN|SEED)_[A-Z_]+$/.test(message) ? message : "SEED_FAILED");
+    process.exitCode = 1;
   })
-  .finally(() => prisma.$disconnect());
+  .finally(async () => {
+    try { await prisma?.$disconnect(); } catch { console.error("SEED_DISCONNECT_FAILED"); process.exitCode = 1; }
+  });

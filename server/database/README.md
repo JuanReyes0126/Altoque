@@ -32,8 +32,9 @@ npx prisma migrate diff --from-url "$DIRECT_DATABASE_URL" \
 # 4) Validar schema sin tocar la BD:
 npx prisma validate
 
-# 5) Seed (idempotente):
-npx tsx server/database/seeds/seed.ts
+# 5) Seed de catálogo: solo una DB local dedicada altoque_dev,
+#    después de configurar localmente su entorno ignorado:
+node --env-file=.env --import=tsx server/database/seeds/seed.ts --apply
 
 # 6) Producción (controlado, NUNCA en desarrollo):
 npx prisma migrate deploy        # en CI, con las credenciales de Production
@@ -52,3 +53,13 @@ npx prisma migrate deploy        # en CI, con las credenciales de Production
 contra la URL pooled, **sin** `$disconnect()` por request. Las transacciones
 interactivas (`$transaction(async tx => …)`) están soportadas: el pooler de
 Neon fija cada transacción a una conexión backend (modo transacción).
+
+## Administrador real
+
+El bootstrap dedicado y sus guardias de destino están documentados en
+[docs/admin-bootstrap.md](../../../docs/admin-bootstrap.md). El seed de catálogo
+rechaza destinos remotos. Crear el administrador en Preview requiere una
+autorización explícita y el CLI dedicado; no ejecuta migraciones ni catálogo.
+
+La suite de integración crea un PostgreSQL local exclusivo por ejecución, aplica
+las tres migraciones existentes y comprueba cleanup. No hereda ni lee `.env`.
