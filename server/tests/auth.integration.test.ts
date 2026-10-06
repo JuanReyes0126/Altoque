@@ -161,6 +161,35 @@ describe.runIf(HAS_DB)("Auth · integración aislada", () => {
     expect(response.headers.get("Cache-Control")).toBe("no-store");
   });
 
+  it.each(["suspended", "blocked"] as const)("login de cuenta %s no emite sesión ni modifica la credencial", async (status) => {
+    const { email, user } = await signupAndVerify(`inactive-${status}`);
+    await prisma.session.deleteMany({ where: { userId: user.id } });
+    const before = await prisma.account.findFirstOrThrow({ where: { userId: user.id, providerId: "credential" }, select: { password: true } });
+    await prisma.user.update({ where: { id: user.id }, data: { status } });
+    await expectAuthFailure(auth.api.signInEmail({ body: { email, password } }), "ACCOUNT_INACTIVE");
+    const response = await app.request("/api/v1/auth/sign-in/email", {
+      method: "POST", headers: { Origin: "http://localhost:3000", "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    expect(response.status).toBe(403);
+    expect((await response.json()).code).toBe("ACCOUNT_INACTIVE");
+    const { authCookies } = await auth.$context;
+    expect(response.headers.getSetCookie().some((cookie) => cookie.startsWith(`${authCookies.sessionToken.name}=`))).toBe(false);
+    expect(await prisma.session.count({ where: { userId: user.id } })).toBe(0);
+    const after = await prisma.account.findFirstOrThrow({ where: { userId: user.id, providerId: "credential" }, select: { password: true } });
+    expect(after.password === before.password).toBe(true);
+  });
+
+  it.each(["suspended", "blocked"] as const)("verificar una cuenta %s conserva la verificación de Better Auth sin autorizar auto-login", async (status) => {
+    const email = uniqueEmail(`verify-inactive-${status}`);
+    await auth.api.signUpEmail({ body: { name: "Inactive fixture", email, password } });
+    const user = await prisma.user.update({ where: { email }, data: { status } });
+    await expectAuthFailure(auth.api.verifyEmail({ query: { token: deliveredToken("verification", email) } }), "ACCOUNT_INACTIVE");
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).emailVerified).toBe(true);
+    expect(await prisma.session.count({ where: { userId: user.id } })).toBe(0);
+    await expectAuthFailure(auth.api.signInEmail({ body: { email, password } }), "ACCOUNT_INACTIVE");
+  });
+
   it("una sesión inicialmente válida es rechazada después de expirar", async () => {
     const { email, user } = await signupAndVerify("expire");
     const { cookie, session } = await login(email);

@@ -18,6 +18,7 @@
  * (decisión Addendum §17 — no se reemplaza su criptografía).
  */
 import { betterAuth } from "better-auth";
+import { APIError } from "better-auth/api";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 // Funciones de hashing POR DEFECTO de la propia librería (mismo algoritmo
 // y parámetros que usaría sin nuestra configuración — solo las envolvemos
@@ -54,9 +55,8 @@ export const auth = betterAuth({
   logger: authLogger,
 
   // ⚠️ TEMPORAL (debug F1.8): hooks de BD de Better Auth — puntos de
-  // instrumentación oficiales de la librería. Solo registran etapas;
-  // `before` devuelve undefined (= "continuar sin cambios") y `after`
-  // no devuelve nada, así que NO alteran el comportamiento.
+  // instrumentación oficiales de la librería. Se conservan las etapas;
+  // session.create.before añade la política de cuenta activa antes del INSERT.
   databaseHooks: {
     user: {
       create: {
@@ -78,7 +78,19 @@ export const auth = betterAuth({
     },
     session: {
       create: {
-        before: async () => { stage("[diag][ba:hook] session.create.before"); },
+        before: async (session) => {
+          stage("[diag][ba:hook] session.create.before");
+          // La política de cuenta también se aplica antes de emitir sesiones
+          // desde login, verificación y cambio de contraseña de Better Auth.
+          const user = await prisma.user.findUnique({
+            where: { id: session.userId }, select: { status: true },
+          });
+          if (user?.status !== "active") {
+            throw new APIError("FORBIDDEN", {
+              code: "ACCOUNT_INACTIVE", message: "Esta cuenta no puede iniciar sesión.",
+            });
+          }
+        },
         after: async () => { stage("[diag][ba:hook] session.create.after"); },
       },
     },

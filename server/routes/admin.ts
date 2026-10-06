@@ -122,6 +122,7 @@ adminRoutes.post("/users/:id/suspend", requireAuth, requireVerifiedEmail, requir
     // Esto protege jerarquía y último super_admin incluso ante concurrencia.
     if (userId === admin.id || target.role === "admin" || target.admin_profile) throw AppError.forbidden("Las cuentas administrativas requieren una operación separada de gestión de administradores");
     if ((await tx.user.updateMany({ where: { id: userId, role: { not: "admin" }, admin_profile: { is: null } }, data: { status: "suspended" } })).count !== 1) throw AppError.conflict("La cuenta cambió; recarga antes de continuar");
+    await tx.session.deleteMany({ where: { userId } });
     await audit(tx, { id: admin.id, name: admin.name, adminRole: c.get("adminRole")! }, {
       action: "USER_SUSPENDED", entityType: "user", entityId: userId, metadata: { reason: data.reason },
     });
@@ -148,6 +149,7 @@ adminRoutes.post("/users/:id/block", requireAuth, requireVerifiedEmail, requireP
     if (!target) throw AppError.notFound("Usuario");
     if (userId === admin.id || target.role === "admin" || target.admin_profile) throw AppError.forbidden("Las cuentas administrativas requieren una operación separada de gestión de administradores");
     if ((await tx.user.updateMany({ where: { id: userId, role: { not: "admin" }, admin_profile: { is: null } }, data: { status: "blocked" } })).count !== 1) throw AppError.conflict("La cuenta cambió; recarga antes de continuar");
+    await tx.session.deleteMany({ where: { userId } });
     await audit(tx, { id: admin.id, name: admin.name, adminRole: c.get("adminRole")! }, {
       action: "USER_BLOCKED", entityType: "user", entityId: userId, metadata: { reason: data.reason },
     });

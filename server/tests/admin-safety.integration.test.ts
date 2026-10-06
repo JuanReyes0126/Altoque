@@ -1,5 +1,7 @@
 /** Protección administrativa, idempotencia y rollback en DB local aislada. */
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { hashPassword } from "better-auth/crypto";
+import { createLocalAccountIssuer } from "better-auth/db";
 import { app } from "../index.js";
 import { auth } from "../auth/auth.js";
 import { prisma } from "../database/prisma.js";
@@ -95,10 +97,41 @@ describe.runIf(HAS_DB)("Admin · protección y atomicidad", () => {
 
   it.each(["suspend", "block"])("fallo de audit revierte %s de un usuario", async (action) => {
     const customer = await createUser();
+    const cookie = await createTestCookie(customer.id);
     vi.spyOn(auditModule, "audit").mockRejectedValueOnce(new Error("TEST_AUDIT_FAILURE"));
     expect((await post(`users/${customer.id}/${action}`)).status).toBe(500);
     expect((await prisma.user.findUniqueOrThrow({ where: { id: customer.id } })).status).toBe("active");
+    expect(Boolean(await auth.api.getSession({ headers: new Headers(testHeaders(cookie)) }))).toBe(true);
+    expect(await prisma.session.count({ where: { userId: customer.id } })).toBe(1);
     expect(await prisma.admin_audit_log.count({ where: { entity_id: customer.id } })).toBe(0);
+  });
+
+  it.each(["suspend", "block"])("%s revoca las sesiones de la cuenta objetivo y conserva las demás", async (action) => {
+    const target = await createUser();
+    const other = await createUser();
+    const credential = await prisma.account.create({ data: {
+      userId: target.id, accountId: target.id, providerId: "credential",
+      issuer: createLocalAccountIssuer("credential"), password: await hashPassword("UnusableFixture123!"),
+    } });
+    const targetCookies = [await createTestCookie(target.id), await createTestCookie(target.id)];
+    const otherCookie = await createTestCookie(other.id);
+    expect((await post(`users/${target.id}/${action}`)).status).toBe(200);
+    expect(await prisma.session.count({ where: { userId: target.id } })).toBe(0);
+    expect(await prisma.session.count({ where: { userId: other.id } })).toBe(1);
+    for (const cookie of targetCookies) {
+      expect((await auth.api.getSession({ headers: new Headers(testHeaders(cookie)) })) === null).toBe(true);
+      expect((await app.request("/api/v1/me", { headers: testHeaders(cookie) })).status).toBe(401);
+      // La sesión revocada tampoco puede iniciar una operación propia de BA.
+      const response = await app.request("/api/v1/auth/change-password", {
+        method: "POST", headers: { ...testHeaders(cookie), "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPassword: "UnusableFixture123!", newPassword: "ReplacementFixture123!", revokeOtherSessions: true }),
+      });
+      expect(response.status).toBe(401);
+    }
+    expect(Boolean(await auth.api.getSession({ headers: new Headers(testHeaders(otherCookie)) }))).toBe(true);
+    expect(Boolean(await auth.api.getSession({ headers: new Headers(testHeaders(adminCookie)) }))).toBe(true);
+    expect((await prisma.account.findUniqueOrThrow({ where: { id: credential.id }, select: { password: true } })).password === credential.password).toBe(true);
+    expect(await prisma.admin_audit_log.count({ where: { entity_id: target.id, action: action === "suspend" ? "USER_SUSPENDED" : "USER_BLOCKED" } })).toBe(1);
   });
 
   it("aprobar perfil dual conserva user.role admin y su admin_profile", async () => {
