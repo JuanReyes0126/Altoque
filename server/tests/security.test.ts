@@ -86,6 +86,7 @@ describe("Cache del API · respuestas privadas y errores", () => {
   it.each([
     ["/api/v1/auth/get-session", 200],
     ["/api/v1/me", 401],
+    ["/api/v1/me/addresses", 401],
     ["/api/v1/no-existe", 404],
   ] as const)("GET %s siempre devuelve no-store", async (path, status) => {
     const response = await app.request(path);

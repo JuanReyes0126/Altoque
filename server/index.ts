@@ -21,6 +21,8 @@ import { diagEnabled } from "./lib/diag.js";
 import { healthRoutes } from "./routes/health.js";
 import { categoryRoutes } from "./routes/categories.js";
 import { meRoutes } from "./routes/me.js";
+import { addressRoutes } from "./routes/addresses.js";
+import { zoneRoutes } from "./routes/zones.js";
 import { requestRoutes } from "./routes/requests.js";
 import { uploadRoutes } from "./routes/uploads.js";
 import { providerRoutes } from "./routes/providers.js";
@@ -101,6 +103,8 @@ app.on(["GET", "POST"], "/api/v1/auth/*", async (c) => {
 app.route("/api/v1", healthRoutes);
 app.route("/api/v1", categoryRoutes);
 app.route("/api/v1", meRoutes);
+app.route("/api/v1/me/addresses", addressRoutes);
+app.route("/api/v1", zoneRoutes);
 
 // ── dominio F2 ──
 app.route("/api/v1/requests", requestRoutes);

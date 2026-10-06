@@ -54,6 +54,19 @@ requestRoutes.post("/", requireAuth, requireVerifiedEmail, async (c) => {
   });
   if (!zone) throw AppError.notFound("Zona");
 
+  // Una dirección nunca concede acceso por conocer su id. También debe
+  // pertenecer a la zona de la solicitud para no enviar al pro a otra zona.
+  if (data.address_id) {
+    const address = await prisma.address.findFirst({
+      where: { id: data.address_id, user_id: user.id },
+      select: { zone_id: true },
+    });
+    if (!address) throw AppError.notFound("Dirección");
+    if (address.zone_id !== data.zone_id) {
+      throw AppError.validation([{ path: "address_id", message: "La dirección pertenece a otra zona" }]);
+    }
+  }
+
   // Validar scheduled_at si when_type es "scheduled"
   if (data.when_type === "scheduled" && !data.scheduled_at) {
     throw AppError.validation([{ path: "scheduled_at", message: "Requerido cuando when_type es 'scheduled'" }]);
