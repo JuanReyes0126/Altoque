@@ -1,0 +1,69 @@
+name: Altoque CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: altoque-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      ALTOQUE_SAFE_VALIDATION: "1"
+      # Prisma/dotenv and Vite must not read project or shared environment files.
+      DOTENV_CONFIG_PATH: ${{ runner.temp }}/altoque-ci-no-env
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Node.js 22
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      # Required install hooks include the local embedded PostgreSQL binaries.
+      # No application credentials or deployment permissions are provided.
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Generate Prisma client without connecting to a database
+        run: npx --no-install prisma generate
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Offline tests
+        run: npm run test:offline
+
+      - name: Integration tests on exclusive local PostgreSQL
+        run: npm run test:integration
+
+      - name: Build
+        run: npm run build
+
+      - name: Check whitespace
+        run: |
+          git diff --check
+          git show --format= --check --first-parent HEAD
+
+      # Remaining HIGH advisories are reported; this does not claim audit = 0.
+      - name: Report full dependency audit
+        continue-on-error: true
+        run: npm audit
+
+      - name: Reject critical dependency advisories
+        run: npm audit --audit-level=critical
