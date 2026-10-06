@@ -3,8 +3,8 @@ import type { PrismaClient } from "@prisma/client";
 import { validatePreviewConnections } from "../../../scripts/preview-validation.mjs";
 
 export const ADMIN_PREVIEW_TARGET = Object.freeze({
-  endpoint: "ep-steep-hall-au81p0co",
-  branch: "br-spring-paper-auff9g85",
+  endpoint: "ep-flat-violet-au1e8xde",
+  branch: "br-wandering-pine-auzjlfe8",
 });
 
 export interface SeedTarget {

@@ -24,12 +24,15 @@ node --env-file=.env --import=tsx server/database/seeds/bootstrap-admin.ts --app
 
 Para Preview, esta ronda solo dejó preparado el comando; no lo ejecutó. Primero
 comprueba manualmente en Neon que la rama se llama **preview** y conserva estos
-identificadores previamente confirmados. Configura localmente `DATABASE_URL`
+identificadores actuales confirmados: `br-wandering-pine-auzjlfe8` y
+`ep-flat-violet-au1e8xde`. Las referencias históricas `br-spring-paper-auff9g85`
+y `ep-steep-hall-au81p0co` corresponden ahora a Production y están prohibidas.
+Configura localmente `DATABASE_URL`
 pooled y `DIRECT_DATABASE_URL` direct de esa misma rama, con schema ausente o
 `public`. Después de autorizar esa escritura, el comando exacto es:
 
 ```sh
-node --env-file=.env --import=tsx server/database/seeds/bootstrap-admin.ts --apply --preview-endpoint=ep-steep-hall-au81p0co --preview-branch=br-spring-paper-auff9g85
+node --env-file=.env --import=tsx server/database/seeds/bootstrap-admin.ts --apply --preview-endpoint=ep-flat-violet-au1e8xde --preview-branch=br-wandering-pine-auzjlfe8
 ```
 
 El script restringe el endpoint y la rama a esos identificadores, compara el par
