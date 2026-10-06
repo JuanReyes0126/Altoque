@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "../../components/icons";
+import { PageIntro } from "../../components/ui/feedback";
 import { authApi } from "../../lib/api";
 import { ApiHttpError } from "../../lib/http";
 import { useApp } from "../../lib/state";
@@ -72,11 +73,11 @@ export function SecurityPage() {
 
   const inputClass = "mt-2 w-full rounded-xl border border-line2 bg-card p-3 text-ink focus:outline-none focus:ring-2 focus:ring-pine";
   return (
-    <main className="max-w-2xl mx-auto px-5 pb-10 pt-6">
+    <main className="max-w-2xl mx-auto px-5 pb-10 pt-6 sm:pt-8 animate-fadein">
       <button className="btn-ghost h-11 px-4 mb-4" onClick={() => navigate("/app/perfil")}><Icon name="chevl" className="w-4 h-4" /> Volver al perfil</button>
-      <h1 className="font-disp font-bold text-2xl">Seguridad y privacidad</h1>
+      <PageIntro eyebrow="Tu cuenta · seguridad" title="Seguridad y privacidad" description="Controla tu contraseña y los accesos de otros dispositivos." />
       <section className="card p-5 mt-5">
-        <h2 className="font-disp font-bold text-lg">Tu cuenta</h2>
+        <span className="ui-icon-tile mb-3"><Icon name="shield" /></span><h2 className="font-disp font-bold text-lg">Tu cuenta</h2>
         <p className="text-sm text-mut mt-2 break-words">{session?.email}</p>
         <p className={`text-sm font-semibold mt-2 ${session?.emailVerified ? "text-ok" : "text-mut"}`}>{session?.emailVerified ? "Correo verificado" : "Correo pendiente de verificación"}</p>
         <p className="text-sm text-mut mt-3">Tu sesión se mantiene mediante una cookie protegida. Tus direcciones guardadas son privadas y solo tú puedes gestionarlas.</p>
@@ -85,12 +86,13 @@ export function SecurityPage() {
       <form onSubmit={changePassword} className="card p-5 mt-4">
         <h2 className="font-disp font-bold text-lg">Cambiar contraseña</h2>
         <p className="text-sm text-mut mt-2">Al cambiarla, se cerrarán las sesiones de los demás dispositivos.</p>
+        <p id="password-requirements" className="text-xs text-mut mt-3">Usa entre 8 y 128 caracteres. Elige una contraseña que no uses en otros servicios.</p>
         <fieldset disabled={busy !== null} className="space-y-4 mt-4">
           <label className="block text-sm font-bold" htmlFor="current-password">Contraseña actual
             <input id="current-password" type="password" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} required className={inputClass} />
           </label>
           <label className="block text-sm font-bold" htmlFor="new-password">Nueva contraseña
-            <input id="new-password" type="password" autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} minLength={8} maxLength={128} required className={inputClass} />
+            <input id="new-password" type="password" aria-describedby="password-requirements" autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} minLength={8} maxLength={128} required className={inputClass} />
           </label>
           <label className="block text-sm font-bold" htmlFor="confirm-password">Confirmar nueva contraseña
             <input id="confirm-password" type="password" autoComplete="new-password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} minLength={8} maxLength={128} required className={inputClass} />
@@ -109,7 +111,7 @@ export function SecurityPage() {
         {confirmRevoke ? (
           <div className="mt-4">
             <p className="text-sm font-semibold">¿Cerrar todas las demás sesiones?</p>
-            <div className="flex gap-3 mt-3">
+            <div className="ui-action-row mt-3">
               <button onClick={revokeOthers} disabled={busy !== null} className="btn-ghost h-11 px-4">{busy === "sessions" ? "Cerrando…" : "Sí, cerrar otras sesiones"}</button>
               <button onClick={() => setConfirmRevoke(false)} disabled={busy !== null} className="btn-ghost h-11 px-4">Cancelar</button>
             </div>

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Icon } from "../../components/icons";
 import { ApiHttpError } from "../../lib/http";
 import { profileApi, type AddressInput, type AddressZone, type SavedAddress } from "../../lib/profile-api";
+import { EmptyState, ErrorState, LoadingState, PageIntro } from "../../components/ui/feedback";
 
 const blankAddress = (): AddressInput => ({ label: "", line: "", zone_id: "" });
 const failure = (error: unknown) => error instanceof ApiHttpError
@@ -18,28 +19,18 @@ export function AddressList({ addresses, loading, error, onRetry, onEdit, onDele
   onDelete: (address: SavedAddress) => void;
   disabled?: boolean;
 }) {
-  if (loading) return <p role="status" className="py-10 text-center text-mut">Cargando direcciones…</p>;
-  if (error) return (
-    <div role="alert" className="card p-5 mt-5 border-cor/30">
-      <p className="text-cor font-semibold">{error}</p>
-      <button onClick={onRetry} className="btn-ghost h-11 px-4 mt-3">Reintentar</button>
-    </div>
-  );
-  if (addresses.length === 0) return (
-    <section className="card p-8 mt-5 text-center">
-      <Icon name="pin" className="w-9 h-9 text-pine mx-auto" />
-      <h2 className="font-disp font-bold text-lg mt-3">Aún no tienes direcciones</h2>
-      <p className="text-sm text-mut mt-2">Guarda tu casa o lugar de trabajo para tener sus datos a mano.</p>
-    </section>
-  );
+  if (loading) return <LoadingState label="Cargando direcciones…" />;
+  if (error) return <ErrorState message={error} onRetry={onRetry} />;
+  if (addresses.length === 0) return <EmptyState icon="pin" title="Aún no tienes direcciones" description="Guarda tu casa o lugar de trabajo para tener sus datos a mano." />;
   return (
     <div className="space-y-3 mt-5">
       {addresses.map((address) => (
-        <section key={address.id} className="card p-5">
+        <section key={address.id} className="card p-5 sm:p-6 relative">
+          <span className="ui-icon-tile mb-4"><Icon name="pin" /></span>
           <h2 className="font-disp font-bold text-lg break-words">{address.label}</h2>
           <p className="text-sm text-mut mt-2 whitespace-pre-wrap break-words">{address.line}</p>
           <p className="text-xs text-soft font-semibold mt-2">{address.zone.name} · {address.zone.municipality}</p>
-          <div className="flex gap-3 mt-4">
+          <div className="ui-action-row mt-4">
             <button disabled={disabled} className="btn-ghost h-11 px-4 disabled:opacity-50" onClick={() => onEdit(address)} aria-label={`Editar ${address.label}`}>Editar</button>
             <button disabled={disabled} className="btn-ghost h-11 px-4 text-cor disabled:opacity-50" onClick={() => onDelete(address)} aria-label={`Eliminar ${address.label}`}>Eliminar</button>
           </div>
@@ -136,10 +127,9 @@ export function AddressesPage() {
 
   const inputClass = "mt-2 w-full rounded-xl border border-line2 bg-card p-3 text-ink focus:outline-none focus:ring-2 focus:ring-pine";
   return (
-    <main className="max-w-2xl mx-auto px-5 pb-10 pt-6">
+    <main className="max-w-2xl mx-auto px-5 pb-10 pt-6 sm:pt-8 animate-fadein">
       <button className="btn-ghost h-11 px-4 mb-4" onClick={() => navigate("/app/perfil")}><Icon name="chevl" className="w-4 h-4" /> Volver al perfil</button>
-      <h1 className="font-disp font-bold text-2xl">Mis direcciones</h1>
-      <p className="text-sm text-mut mt-2">Estas direcciones son privadas y se guardan en tu cuenta.</p>
+      <PageIntro eyebrow="Tu cuenta · direcciones" title="Mis direcciones" description="Estas direcciones son privadas y se guardan en tu cuenta." />
       {message && <p role="status" className="mt-4 text-ok font-semibold">{message}</p>}
       {!loading && !loadError && (
         <button disabled={busy || zones.length === 0} onClick={() => openForm(null)} className="btn-pine mt-5 px-5 h-11 disabled:opacity-50">Agregar dirección</button>
@@ -165,7 +155,7 @@ export function AddressesPage() {
             </label>
           </fieldset>
           {formError && <p role="alert" className="text-cor text-sm mt-4">{formError}</p>}
-          <div className="flex gap-3 mt-5">
+          <div className="ui-action-row mt-5">
             <button type="submit" disabled={busy} className="btn-pine h-11 px-5 disabled:opacity-50">{busy ? "Guardando…" : "Guardar dirección"}</button>
             <button type="button" disabled={busy} onClick={() => setFormOpen(false)} className="btn-ghost h-11 px-4">Cancelar</button>
           </div>
@@ -177,7 +167,7 @@ export function AddressesPage() {
           <h2 className="font-bold">¿Eliminar “{deleting.label}”?</h2>
           <p className="text-sm text-mut mt-2">Esta dirección se quitará de tu cuenta.</p>
           {deleteError && <p className="text-cor text-sm mt-3">{deleteError}</p>}
-          <div className="flex gap-3 mt-4">
+          <div className="ui-action-row mt-4">
             <button onClick={remove} disabled={busy} className="btn-ghost h-11 px-4 text-cor">{busy ? "Eliminando…" : "Sí, eliminar"}</button>
             <button onClick={() => setDeleting(null)} disabled={busy} className="btn-ghost h-11 px-4">Cancelar</button>
           </div>

@@ -65,19 +65,31 @@ function ClientShell() {
   else if (loc.pathname === `${PATHS.app}/perfil`) { activeTab = "me"; view = <MeTab go={go} jump={jump} />; }
   else if (loc.pathname === `${PATHS.app}/perfil/direcciones`) { activeTab = "me"; view = <AddressesPage />; }
   else if (loc.pathname === `${PATHS.app}/perfil/seguridad`) { activeTab = "me"; view = <SecurityPage />; }
-  else if (seg.length === 3 && seg[1] === "servicios" && seg[2]) view = <ResultsView key={seg[2]} catId={seg[2]} go={go} />;
-  else if (seg.length === 3 && seg[1] === "profesional" && seg[2]) view = <ProProfile key={seg[2]} id={seg[2]} go={go} />;
-  else if (loc.pathname === `${PATHS.app}/solicitar`)
-    view = <RequestWizard key={loc.search} catId={sp.get("cat") ?? undefined} proId={sp.get("pro") ?? undefined} go={go} />;
-  else if (seg.length === 3 && seg[1] === "solicitud" && seg[2]) view = <TrackingView key={seg[2]} jobId={seg[2]} go={go} jump={jump} />;
+  else if (seg.length === 3 && seg[1] === "servicios" && seg[2]) { activeTab = "explore"; view = <ResultsView key={seg[2]} catId={seg[2]} go={go} />; }
+  else if (seg.length === 3 && seg[1] === "profesional" && seg[2]) { activeTab = "explore"; view = <ProProfile key={seg[2]} id={seg[2]} go={go} />; }
+  else if (loc.pathname === `${PATHS.app}/solicitar`) {
+    activeTab = "jobs"; view = <RequestWizard key={loc.search} catId={sp.get("cat") ?? undefined} proId={sp.get("pro") ?? undefined} go={go} />;
+  }
+  else if (seg.length === 3 && seg[1] === "solicitud" && seg[2]) { activeTab = "jobs"; view = <TrackingView key={seg[2]} jobId={seg[2]} go={go} jump={jump} />; }
   else view = <NotFoundPage />;
 
   return (
     <div className="min-h-dvh">
-      <div className="pb-24">{view}</div>
+      <button type="button" className="ui-skip-link" onClick={() => { const content = document.getElementById("client-content"); content?.focus(); content?.scrollIntoView({ block: "start" }); }}>Saltar al contenido</button>
+      <header className="sticky top-0 z-40 bg-paper/95 backdrop-blur border-b border-line2">
+        <div className="max-w-6xl mx-auto px-5 min-h-18 flex items-center justify-between gap-3 py-3">
+          <button onClick={() => jump("home")} aria-label="Altoque — mi inicio" className="flex items-center gap-2 min-h-11 shrink-0">
+            <span className="w-9 h-9 rounded-xl bg-pine text-white grid place-items-center"><Icon name="bolt" className="w-5 h-5" /></span>
+            <span className="font-disp text-xl font-bold">altoque<span className="text-sun">.</span></span>
+          </button>
+          <nav className="hidden lg:flex gap-1" aria-label="Navegación principal del cliente">{TAB_META.map((tab) => <button key={tab.k} onClick={() => jump(tab.k)} aria-current={activeTab === tab.k ? "page" : undefined} className="client-nav-link"><Icon name={tab.icon} className="w-4 h-4" />{tab.l}</button>)}</nav>
+          <button onClick={() => jump("me")} aria-label="Abrir mi perfil" className="w-11 h-11 rounded-full bg-pinesoft text-pine font-bold grid place-items-center shrink-0">{s.session?.name.charAt(0).toLocaleUpperCase("es") || <Icon name="user" />}</button>
+        </div>
+      </header>
+      <div id="client-content" tabIndex={-1} className="pb-28 lg:pb-10 outline-none">{view}</div>
 
       {/* bottom navigation */}
-      <nav className="fixed bottom-0 inset-x-0 z-50">
+      <nav className="fixed bottom-0 inset-x-0 z-50 lg:hidden" aria-label="Navegación del cliente">
         <div className="mx-auto max-w-md lg:max-w-xl px-4 pb-[max(0.8rem,env(safe-area-inset-bottom))]">
           <div className="rounded-[1.6rem] bg-card/95 backdrop-blur border border-line2 shadow-lift grid grid-cols-5 h-[4.2rem]">
             {TAB_META.map((t) => {
@@ -88,6 +100,7 @@ function ClientShell() {
                   onClick={() => jump(t.k)}
                   className={`relative flex flex-col items-center justify-center gap-1 rounded-[1.2rem] mx-1 my-1.5 transition-all duration-200 ${active ? "bg-pinesoft text-pine" : "text-soft hover:text-mut"}`}
                   aria-label={t.l}
+                  aria-current={active ? "page" : undefined}
                 >
                   <Icon name={t.icon} className={`w-[1.35rem] h-[1.35rem] transition-transform ${active ? "scale-110" : ""}`} strokeWidth={active ? 2.3 : 1.9} />
                   <span className="text-[0.58rem] font-extrabold">{t.l}</span>
@@ -113,7 +126,7 @@ function Toast() {
   if (!show || !toastMsg) return null;
   return (
     <div key={toastId} className="fixed bottom-24 inset-x-0 z-[80] flex justify-center px-5 pointer-events-none">
-      <div className="animate-pop bg-ink text-white rounded-full pl-4 pr-5 py-3 text-[0.85rem] font-bold shadow-lift max-w-md text-center flex items-center gap-2.5">
+      <div role="status" aria-live="polite" className="animate-pop bg-ink text-white rounded-full pl-4 pr-5 py-3 text-[0.85rem] font-bold shadow-lift max-w-md text-center flex items-center gap-2.5">
         <span className="w-2 h-2 rounded-full bg-[#4ade80] shrink-0" />
         {toastMsg}
       </div>
@@ -163,7 +176,7 @@ function useAuthBootstrap() {
 
 function AuthSplash() {
   return (
-    <div className="min-h-dvh grid place-items-center bg-bg" role="status" aria-live="polite" aria-busy="true" aria-label="Cargando Altoque">
+    <div className="min-h-dvh grid place-items-center bg-paper" role="status" aria-live="polite" aria-busy="true" aria-label="Cargando Altoque">
       <div className="flex flex-col items-center gap-4 animate-fadein">
         <span className="w-14 h-14 rounded-2xl bg-pine text-white grid place-items-center shadow-lift animate-pulse">
           <Icon name="bolt" className="w-7 h-7" strokeWidth={2} />
