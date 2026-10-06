@@ -12,6 +12,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../database/prisma.js";
+import { readPageSnapshot } from "../database/read-page.js";
 import { requireAuth, requireVerifiedEmail, type AuthEnv } from "../middleware/auth.js";
 import { ok, page, pageMeta, parsePaging } from "../lib/envelope.js";
 import { AppError } from "../lib/errors.js";
@@ -225,12 +226,12 @@ providerRoutes.get("/inbox", requireAuth, requireVerifiedEmail, async (c) => {
     zone_id: { in: zoneIds },
   };
 
-  const [requests, total] = await Promise.all([
-    prisma.service_request.findMany({
+  const [requests, total] = await readPageSnapshot((tx) => Promise.all([
+    tx.service_request.findMany({
       where,
       skip,
       take: limit,
-      orderBy: { created_at: "desc" },
+      orderBy: [{ created_at: "desc" }, { id: "desc" }],
       include: {
         category: true,
         zone: true,
@@ -242,8 +243,8 @@ providerRoutes.get("/inbox", requireAuth, requireVerifiedEmail, async (c) => {
         },
       },
     }),
-    prisma.service_request.count({ where }),
-  ]);
+    tx.service_request.count({ where }),
+  ]));
 
   return c.json(page(requests, pageMeta(pageNum, limit, total)));
 });

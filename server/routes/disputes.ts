@@ -11,6 +11,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../database/prisma.js";
+import { readPageSnapshot } from "../database/read-page.js";
 import { requireAuth, requireVerifiedEmail, requirePermission, type AuthEnv } from "../middleware/auth.js";
 import { ok, page, pageMeta, parsePaging } from "../lib/envelope.js";
 import { AppError } from "../lib/errors.js";
@@ -30,8 +31,8 @@ disputeRoutes.get("/admin/all", requireAuth, requireVerifiedEmail, requirePermis
   const where: any = {};
   if (status) where.status = status;
 
-  const [disputes, total] = await Promise.all([
-    prisma.dispute.findMany({
+  const [disputes, total] = await readPageSnapshot((tx) => Promise.all([
+    tx.dispute.findMany({
       where,
       skip,
       take: limit,
@@ -52,8 +53,8 @@ disputeRoutes.get("/admin/all", requireAuth, requireVerifiedEmail, requirePermis
         resolver: { select: { id: true, name: true, email: true } },
       },
     }),
-    prisma.dispute.count({ where }),
-  ]);
+    tx.dispute.count({ where }),
+  ]));
 
   return c.json(page(disputes, pageMeta(pageNum, limit, total)));
 });
@@ -189,12 +190,12 @@ disputeRoutes.get("/", requireAuth, requireVerifiedEmail, async (c) => {
     ],
   };
 
-  const [disputes, total] = await Promise.all([
-    prisma.dispute.findMany({
+  const [disputes, total] = await readPageSnapshot((tx) => Promise.all([
+    tx.dispute.findMany({
       where,
       skip,
       take: limit,
-      orderBy: { created_at: "desc" },
+      orderBy: [{ created_at: "desc" }, { id: "desc" }],
       include: {
         request: {
           include: {
@@ -211,8 +212,8 @@ disputeRoutes.get("/", requireAuth, requireVerifiedEmail, async (c) => {
         resolver: { select: { id: true, name: true, email: true } },
       },
     }),
-    prisma.dispute.count({ where }),
-  ]);
+    tx.dispute.count({ where }),
+  ]));
 
   return c.json(page(disputes, pageMeta(pageNum, limit, total)));
 });

@@ -13,6 +13,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { AccountStatus, ProviderVerificationStatus, RequestStatus, UserRole } from "@prisma/client";
 import { prisma } from "../database/prisma.js";
+import { readPageSnapshot } from "../database/read-page.js";
 import { requireAuth, requireVerifiedEmail, requirePermission, type AuthEnv } from "../middleware/auth.js";
 import { ok, page, pageMeta, parsePaging } from "../lib/envelope.js";
 import { AppError } from "../lib/errors.js";
@@ -80,8 +81,8 @@ adminRoutes.get("/users", requireAuth, requireVerifiedEmail, requirePermission("
     ];
   }
 
-  const [users, total] = await Promise.all([
-    prisma.user.findMany({
+  const [users, total] = await readPageSnapshot((tx) => Promise.all([
+    tx.user.findMany({
       where,
       skip,
       take: limit,
@@ -96,8 +97,8 @@ adminRoutes.get("/users", requireAuth, requireVerifiedEmail, requirePermission("
         createdAt: true,
       },
     }),
-    prisma.user.count({ where }),
-  ]);
+    tx.user.count({ where }),
+  ]));
 
   return c.json(page(users, pageMeta(pageNum, limit, total)));
 });
@@ -167,8 +168,8 @@ adminRoutes.get("/providers", requireAuth, requireVerifiedEmail, requirePermissi
   const where: any = {};
   if (status) where.verification_status = status;
 
-  const [providers, total] = await Promise.all([
-    prisma.provider_profile.findMany({
+  const [providers, total] = await readPageSnapshot((tx) => Promise.all([
+    tx.provider_profile.findMany({
       where,
       skip,
       take: limit,
@@ -185,8 +186,8 @@ adminRoutes.get("/providers", requireAuth, requireVerifiedEmail, requirePermissi
         },
       },
     }),
-    prisma.provider_profile.count({ where }),
-  ]);
+    tx.provider_profile.count({ where }),
+  ]));
 
   return c.json(page(providers, pageMeta(pageNum, limit, total)));
 });
@@ -265,8 +266,8 @@ adminRoutes.get("/requests", requireAuth, requireVerifiedEmail, requirePermissio
   const where: any = {};
   if (status) where.status = status;
 
-  const [requests, total] = await Promise.all([
-    prisma.service_request.findMany({
+  const [requests, total] = await readPageSnapshot((tx) => Promise.all([
+    tx.service_request.findMany({
       where,
       skip,
       take: limit,
@@ -286,8 +287,8 @@ adminRoutes.get("/requests", requireAuth, requireVerifiedEmail, requirePermissio
         zone: true,
       },
     }),
-    prisma.service_request.count({ where }),
-  ]);
+    tx.service_request.count({ where }),
+  ]));
 
   return c.json(page(requests, pageMeta(pageNum, limit, total)));
 });
@@ -327,8 +328,8 @@ adminRoutes.get("/audit", requireAuth, requireVerifiedEmail, requirePermission("
   if (action) where.action = action;
   if (actorId) where.actor_id = actorId;
 
-  const [logs, total] = await Promise.all([
-    prisma.admin_audit_log.findMany({
+  const [logs, total] = await readPageSnapshot((tx) => Promise.all([
+    tx.admin_audit_log.findMany({
       where,
       skip,
       take: limit,
@@ -339,8 +340,8 @@ adminRoutes.get("/audit", requireAuth, requireVerifiedEmail, requirePermission("
         },
       },
     }),
-    prisma.admin_audit_log.count({ where }),
-  ]);
+    tx.admin_audit_log.count({ where }),
+  ]));
 
   return c.json(page(logs, pageMeta(pageNum, limit, total)));
 });

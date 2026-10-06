@@ -249,6 +249,34 @@ describe.runIf(HAS_DB)("Backend · estabilización de inputs, altas y elegibilid
     await expect(claimRequest(prisma, { requestId: next.id, providerUserId: users.provider, etaMin: 15 })).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
+  it.each(["requests", "inbox", "disputes"] as const)("%s pagina fechas empatadas sin solapamientos ni omisiones", async (list) => {
+    if (list === "inbox") await makeProvider();
+    const ids: string[] = [];
+    const created_at = new Date("2026-01-01T00:00:00.000Z");
+    for (let index = 0; index < 5; index++) {
+      const request = await makeRequest();
+      await prisma.service_request.update({ where: { id: request.id }, data: { created_at, ...(list === "disputes" ? { status: "completed" } : {}) } });
+      if (list === "disputes") {
+        const dispute = await prisma.dispute.create({ data: { id: ulid(), request_id: request.id, opened_by: users.customer, reason: "Disputa fixture paginación", created_at } });
+        ids.push(dispute.id);
+      } else ids.push(request.id);
+    }
+    const path = list === "inbox" ? "/api/v1/provider/inbox" : `/api/v1/${list}`;
+    const expected = ids.sort().reverse();
+    const rows: string[] = [];
+    for (let page = 1; page <= 3; page++) {
+      const response = await send(`${path}?limit=2&page=${page}`, list === "inbox" ? "provider" : "customer", undefined, "GET");
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.meta).toEqual({ page, limit: 2, total: 5, pages: 3 });
+      const pageIds = body.data.map((row: { id: string }) => row.id);
+      expect(pageIds).toEqual(expected.slice((page - 1) * 2, page * 2));
+      rows.push(...pageIds);
+    }
+    expect(rows).toEqual(expected);
+    expect(new Set(rows).size).toBe(5);
+  });
+
   it("claim y aprobación respetan profile→user y completan sin deadlock", async () => {
     const provider = await makeProvider();
     await prisma.provider_profile.update({ where: { id: provider.id }, data: { verification_status: "pending_verification" } });

@@ -9,6 +9,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { prisma } from "../database/prisma.js";
+import { readPageSnapshot } from "../database/read-page.js";
 import { requireAuth, requireVerifiedEmail, type AuthEnv } from "../middleware/auth.js";
 import { ok, page, pageMeta, parsePaging } from "../lib/envelope.js";
 import { AppError } from "../lib/errors.js";
@@ -147,12 +148,12 @@ requestRoutes.get("/", requireAuth, requireVerifiedEmail, async (c) => {
 
   const where = { customer_id: user.id };
 
-  const [requests, total] = await Promise.all([
-    prisma.service_request.findMany({
+  const [requests, total] = await readPageSnapshot((tx) => Promise.all([
+    tx.service_request.findMany({
       where,
       skip,
       take: limit,
-      orderBy: { created_at: "desc" },
+      orderBy: [{ created_at: "desc" }, { id: "desc" }],
       include: {
         category: true,
         zone: true,
@@ -169,8 +170,8 @@ requestRoutes.get("/", requireAuth, requireVerifiedEmail, async (c) => {
         review: true,
       },
     }),
-    prisma.service_request.count({ where }),
-  ]);
+    tx.service_request.count({ where }),
+  ]));
 
   return c.json(page(requests, pageMeta(pageNum, limit, total)));
 });
