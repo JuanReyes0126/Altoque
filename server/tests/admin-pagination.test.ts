@@ -8,6 +8,7 @@ import { ADMIN_PAGE_LIMIT, boundedAdminPage, startAdminPageRequest, validateAdmi
 const meta: AdminPageMeta = { page: 2, limit: 20, total: 43, pages: 3 };
 const props = { page: 2, meta, rowCount: 20, loading: false, error: "", label: "usuarios", onPage: () => {} };
 const button = (html: string, label: string) => html.match(new RegExp(`<button[^>]*>${label}</button>`))?.[0] ?? "";
+const disabledAttribute = /\sdisabled(?:=|\s|>)/;
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -16,20 +17,20 @@ describe("A18 · navegación y estados administrativos", () => {
     const html = renderToStaticMarkup(createElement(AdminPagination, props));
     expect(html).toContain("21–40 de 43 · Página 2 de 3");
     expect(html).toContain('aria-label="Páginas de usuarios"');
-    expect(button(html, "Anterior")).not.toContain("disabled");
-    expect(button(html, "Siguiente")).not.toContain("disabled");
+    expect(button(html, "Anterior")).not.toMatch(disabledAttribute);
+    expect(button(html, "Siguiente")).not.toMatch(disabledAttribute);
   });
 
   it("primera, última y página única respetan los límites sin ocultar controles", () => {
     const first = renderToStaticMarkup(createElement(AdminPagination, { ...props, page: 1, meta: { ...meta, page: 1 } }));
-    expect(button(first, "Anterior")).toContain("disabled");
-    expect(button(first, "Siguiente")).not.toContain("disabled");
+    expect(button(first, "Anterior")).toMatch(disabledAttribute);
+    expect(button(first, "Siguiente")).not.toMatch(disabledAttribute);
     const last = renderToStaticMarkup(createElement(AdminPagination, { ...props, page: 3, rowCount: 3, meta: { ...meta, page: 3 } }));
     expect(last).toContain("41–43 de 43 · Página 3 de 3");
-    expect(button(last, "Siguiente")).toContain("disabled");
+    expect(button(last, "Siguiente")).toMatch(disabledAttribute);
     const only = renderToStaticMarkup(createElement(AdminPagination, { ...props, page: 1, rowCount: 1, meta: { page: 1, limit: 20, total: 1, pages: 1 } }));
-    expect(button(only, "Anterior")).toContain("disabled");
-    expect(button(only, "Siguiente")).toContain("disabled");
+    expect(button(only, "Anterior")).toMatch(disabledAttribute);
+    expect(button(only, "Siguiente")).toMatch(disabledAttribute);
     expect(boundedAdminPage(-1, 3)).toBe(1);
     expect(boundedAdminPage(100, 3)).toBe(3);
   });
@@ -40,15 +41,15 @@ describe("A18 · navegación y estados administrativos", () => {
     expect(html).toContain("Cargando usuarios");
     expect(html).not.toContain("FILA ANTERIOR");
     expect(html).not.toContain("21–40");
-    expect(button(html, "Anterior")).toContain("disabled");
-    expect(button(html, "Siguiente")).toContain("disabled");
+    expect(button(html, "Anterior")).toMatch(disabledAttribute);
+    expect(button(html, "Siguiente")).toMatch(disabledAttribute);
   });
 
   it("error ofrece retry y volver a una página anterior, sin tabla ni vacío falso", () => {
     const html = renderToStaticMarkup(createElement(AdminPageView, { ...props, error: "Fallo de carga", onRetry: () => {}, children: "FILA ANTERIOR" }));
     expect(html).toContain('role="alert"');
     expect(html).toContain("Reintentar");
-    expect(button(html, "Anterior")).not.toContain("disabled");
+    expect(button(html, "Anterior")).not.toMatch(disabledAttribute);
     expect(html).not.toContain("No hay usuarios");
     expect(html).not.toContain("FILA ANTERIOR");
     expect(html).not.toContain("21–40");
@@ -64,8 +65,8 @@ describe("A18 · navegación y estados administrativos", () => {
 
   it("una mutación pendiente bloquea ambos controles de página", () => {
     const html = renderToStaticMarkup(createElement(AdminPagination, { ...props, disabled: true }));
-    expect(button(html, "Anterior")).toContain("disabled");
-    expect(button(html, "Siguiente")).toContain("disabled");
+    expect(button(html, "Anterior")).toMatch(disabledAttribute);
+    expect(button(html, "Siguiente")).toMatch(disabledAttribute);
   });
 });
 
