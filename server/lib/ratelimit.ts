@@ -37,24 +37,19 @@ export async function consume(db: PrismaClient, rule: RateLimitRule, subject: st
   const now = new Date();
   const windowStart = new Date(Math.floor(now.getTime() / (rule.windowSec * 1000)) * rule.windowSec * 1000);
 
-  const row = await db.rate_limit.upsert({
-    where: { bucket_subject: { bucket: rule.bucket, subject } },
-    update: {
-      count: { increment: 1 },
-      // si cambió la ventana, Prisma no resetea en el mismo upsert:
-      // se corrige abajo con un update condicional.
-    },
-    create: { bucket: rule.bucket, subject, count: 1, window_start: windowStart },
-  });
-
-  if (row.window_start.getTime() !== windowStart.getTime()) {
-    // Nueva ventana: reinicia el contador de forma condicional.
-    await db.rate_limit.updateMany({
-      where: { bucket: rule.bucket, subject, window_start: row.window_start },
-      data: { count: 1, window_start: windowStart },
-    });
-    return;
-  }
-
-  if (row.count > rule.max) throw AppError.rateLimited();
+  // Reset e incremento en UNA sentencia: requests concurrentes al cambiar
+  // de ventana no pueden reiniciar el mismo contador ni saltarse el límite.
+  const [row] = await db.$queryRaw<{ count: number }[]>`
+    INSERT INTO "rate_limit" ("bucket", "subject", "count", "window_start")
+    VALUES (${rule.bucket}, ${subject}, 1, ${windowStart})
+    ON CONFLICT ("bucket", "subject") DO UPDATE SET
+      "count" = CASE
+        WHEN "rate_limit"."window_start" = EXCLUDED."window_start"
+        THEN LEAST("rate_limit"."count" + 1, ${rule.max + 1})
+        ELSE 1
+      END,
+      "window_start" = EXCLUDED."window_start"
+    RETURNING "count"
+  `;
+  if (!row || row.count > rule.max) throw AppError.rateLimited();
 }

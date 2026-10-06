@@ -26,7 +26,9 @@ import { hashPassword as baHashPassword, verifyPassword as baVerifyPassword } fr
 import { prisma } from "../database/prisma.js";
 import { canonicalOrigin, env, isProd, trustedOrigins } from "../config/env.js";
 import { diagEnabled, stage, withDiagAdapter } from "../lib/diag.js";
-import { resetPasswordEmail, verificationEmail } from "./email.js";
+import { resetPasswordEmail, verificationEmail, RESET_PASSWORD_EXPIRES_SECONDS, VERIFICATION_EXPIRES_SECONDS } from "./email.js";
+import { createEmailDeliveryHooks } from "./email-hooks.js";
+import { authLogger } from "./logger.js";
 
 const e = env();
 
@@ -48,6 +50,8 @@ export const auth = betterAuth({
   secret: e.BETTER_AUTH_SECRET,
   database,
   trustedOrigins: trustedOrigins(),
+  hooks: createEmailDeliveryHooks(prisma),
+  logger: authLogger,
 
   // ⚠️ TEMPORAL (debug F1.8): hooks de BD de Better Auth — puntos de
   // instrumentación oficiales de la librería. Solo registran etapas;
@@ -107,6 +111,7 @@ export const auth = betterAuth({
     // La protección CSRF la completa la validación de Origen en
     // server/middleware/security.ts (Addendum §7).
     useSecureCookies: isProd(),
+    ipAddress: { ipAddressHeaders: ["x-vercel-forwarded-for"] },
   },
 
   session: {
@@ -127,6 +132,7 @@ export const auth = betterAuth({
     // Flujo aprobado: registro → cuenta no verificada (sin sesión) →
     // email → verificación → auto-login emite la primera sesión válida.
     autoSignInAfterVerification: true,
+    expiresIn: VERIFICATION_EXPIRES_SECONDS,
     sendVerificationEmail: verificationEmail,
   },
 
@@ -134,6 +140,8 @@ export const auth = betterAuth({
     enabled: true,
     requireEmailVerification: true,
     minPasswordLength: 8,
+    resetPasswordTokenExpiresIn: RESET_PASSWORD_EXPIRES_SECONDS,
+    revokeSessionsOnPasswordReset: true,
     sendResetPassword: resetPasswordEmail,
   },
 

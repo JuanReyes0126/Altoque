@@ -36,9 +36,9 @@ const schema = z.object({
   BLOB_READ_WRITE_TOKEN: z.string().optional(),
   BLOB_PRIVATE_READ_WRITE_TOKEN: z.string().optional(),
 
-  /** Email transaccional — en dev se imprime en consola */
-  EMAIL_FROM: z.string().default("Altoque <no-reply@altoque.do>"),
-  RESEND_API_KEY: z.string().optional(),
+  /** Email transaccional: configurado solo en el servidor, sin remitente ficticio. */
+  EMAIL_FROM: z.string().trim().optional(),
+  RESEND_API_KEY: z.string().trim().optional(),
 });
 
 export type Env = z.infer<typeof schema>;
@@ -99,5 +99,13 @@ export function canonicalOrigin(): string {
 export function trustedOrigins(): string[] {
   const e = env();
   const extra = (e.EXTRA_TRUSTED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  return [canonicalOrigin(), ...extra];
+  const origins = [canonicalOrigin(), ...extra];
+  // Alias de esta rama Preview, inyectado por Vercel. Nunca aceptar comodines,
+  // URLs, paths ni dominios de Production a través de esta variable.
+  const branchHost = process.env.VERCEL_BRANCH_URL;
+  if (process.env.VERCEL_ENV === "preview" && branchHost
+    && /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.vercel\.app$/i.test(branchHost)) {
+    origins.push(`https://${branchHost.toLowerCase()}`);
+  }
+  return [...new Set(origins)];
 }

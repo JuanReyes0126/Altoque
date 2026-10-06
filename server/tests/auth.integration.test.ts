@@ -1,22 +1,34 @@
 /** Autenticación real de Better Auth sobre una base exclusiva de tests. */
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { auth } from "../auth/auth.js";
+import { app } from "../index.js";
 import { prisma } from "../database/prisma.js";
 import { ulid } from "../lib/ids.js";
 import { HAS_DB } from "./setup";
 import { testHeaders } from "./session-helpers.js";
+import { emailLimitSubject } from "../auth/rate-limit.js";
 
 // Capturamos los emails en memoria: no se envían ni se imprimen enlaces/tokens.
 const delivered = vi.hoisted(() => ({
   verification: new Map<string, string>(),
   reset: new Map<string, string>(),
+  failedVerification: new Set<string>(),
+  failedReset: new Set<string>(),
+  configured: true,
 }));
-vi.mock("../auth/email.js", () => ({
+vi.mock("../auth/email.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../auth/email.js")>(),
+  assertEmailConfigured: () => {
+    if (!delivered.configured) throw new Error("not configured");
+    return { apiKey: "test-only", from: "test@example.com" };
+  },
   verificationEmail: async ({ user, token }: { user: { email: string }; token: string }) => {
+    if (delivered.failedVerification.has(user.email)) throw new Error("transport failed");
     delivered.verification.set(user.email, token);
   },
   resetPasswordEmail: async ({ user, token }: { user: { email: string }; token: string }) => {
     delivered.reset.set(user.email, token);
+    if (delivered.failedReset.has(user.email)) throw new Error("transport failed");
   },
 }));
 
@@ -32,11 +44,16 @@ describe.runIf(HAS_DB)("Auth · integración aislada", () => {
         await context.internalAdapter.deleteVerificationByIdentifier(`reset-password:${token}`);
       }
       if (createdEmails.length > 0) {
+        await prisma.rate_limit.deleteMany({ where: {
+          subject: { in: createdEmails.map((email) => emailLimitSubject(email, context.secret)) },
+        } });
         await prisma.user.deleteMany({ where: { email: { in: createdEmails } } });
       }
     } finally {
       delivered.verification.clear();
       delivered.reset.clear();
+      delivered.failedVerification.clear();
+      delivered.failedReset.clear();
       await prisma.$disconnect();
     }
   });
@@ -136,6 +153,14 @@ describe.runIf(HAS_DB)("Auth · integración aislada", () => {
     expect(await prisma.session.count({ where: { userId: result.response.user.id } })).toBe(0);
   });
 
+  it("GET del perfil autenticado no permite cachear datos privados", async () => {
+    const { email } = await signupAndVerify("private-cache");
+    const { cookie } = await login(email);
+    const response = await app.request("/api/v1/me", { headers: testHeaders(cookie) });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+  });
+
   it("una sesión inicialmente válida es rechazada después de expirar", async () => {
     const { email, user } = await signupAndVerify("expire");
     const { cookie, session } = await login(email);
@@ -163,7 +188,7 @@ describe.runIf(HAS_DB)("Auth · integración aislada", () => {
     const email = uniqueEmail("vexp");
     await auth.api.signUpEmail({ body: { name: "V Exp", email, password } });
     const token = deliveredToken("verification", email);
-    // Altoque no sobreescribe expiresIn; Better Auth usa 3600 segundos.
+    // Altoque configura explícitamente 3600 segundos, igual que el texto enviado.
     const future = Date.now() + (3600 + 60) * 1000;
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
@@ -179,6 +204,7 @@ describe.runIf(HAS_DB)("Auth · integración aislada", () => {
 
   it("reset token de un solo uso: segundo intento falla y la contraseña nueva funciona", async () => {
     const { email } = await signupAndVerify("reset");
+    const { cookie: priorCookie } = await login(email);
     const requested = await auth.api.requestPasswordReset({
       body: { email, redirectTo: "http://localhost:3000/reset" },
     });
@@ -186,10 +212,88 @@ describe.runIf(HAS_DB)("Auth · integración aislada", () => {
     const token = deliveredToken("reset", email);
     const reset = await auth.api.resetPassword({ body: { token, newPassword: "NewPassword123!" } });
     expect(reset.status).toBe(true);
+    const staleSession = await auth.api.getSession({ headers: new Headers(testHeaders(priorCookie)) });
+    expect(staleSession === null).toBe(true);
+    const resetUser = await prisma.user.findUniqueOrThrow({ where: { email } });
+    expect(await prisma.session.count({ where: { userId: resetUser.id } })).toBe(0);
     await expectAuthFailure(
       auth.api.resetPassword({ body: { token, newPassword: "OtherPassword123!" } }), "INVALID_TOKEN",
     );
     await login(email, "NewPassword123!");
     await expectAuthFailure(auth.api.signInEmail({ body: { email, password } }), "INVALID_EMAIL_OR_PASSWORD");
+  });
+
+  it("fallo de verificación conserva cuenta no verificada y reenvío permite recuperarla", async () => {
+    const email = uniqueEmail("delivery-recovery");
+    delivered.failedVerification.add(email);
+    await expectAuthFailure(auth.api.signUpEmail({ body: { name: "Cliente", email, password } }), "VERIFICATION_EMAIL_FAILED");
+    const user = await prisma.user.findUniqueOrThrow({ where: { email } });
+    expect(user.emailVerified).toBe(false);
+    expect(await prisma.session.count({ where: { userId: user.id } })).toBe(0);
+    delivered.failedVerification.delete(email);
+    expect((await auth.api.sendVerificationEmail({ body: { email } })).status).toBe(true);
+    await auth.api.verifyEmail({ query: { token: deliveredToken("verification", email) } });
+    expect((await prisma.user.findUniqueOrThrow({ where: { email } })).emailVerified).toBe(true);
+    await login(email);
+  });
+
+  it("límite durable de reenvío resiste requests concurrentes y casing del email", async () => {
+    const email = uniqueEmail("resend-limit");
+    await auth.api.signUpEmail({ body: { name: "Cliente", email, password } });
+    const outcomes = await Promise.allSettled(Array.from({ length: 5 }, (_, index) =>
+      auth.api.sendVerificationEmail({ body: { email: index % 2 ? email.toUpperCase() : email } }),
+    ));
+    expect(outcomes.filter((outcome) => outcome.status === "fulfilled").length).toBe(3);
+    const codes = outcomes.flatMap((outcome) => outcome.status === "rejected"
+      ? [(outcome.reason as { body?: { code?: string } }).body?.code] : []);
+    expect(codes).toEqual(["RATE_LIMITED", "RATE_LIMITED"]);
+    const context = await auth.$context;
+    const row = await prisma.rate_limit.findUniqueOrThrow({ where: { bucket_subject: {
+      bucket: "auth:resend", subject: emailLimitSubject(email, context.secret),
+    } } });
+    expect(row.count).toBe(4);
+  });
+
+  it("dos registros concurrentes no comparten estado de entrega", async () => {
+    const failed = uniqueEmail("concurrent-failed");
+    const success = uniqueEmail("concurrent-ok");
+    delivered.failedVerification.add(failed);
+    const outcomes = await Promise.allSettled([
+      auth.api.signUpEmail({ body: { name: "Fallo", email: failed, password } }),
+      auth.api.signUpEmail({ body: { name: "Éxito", email: success, password } }),
+    ]);
+    expect(outcomes.map((outcome) => outcome.status)).toEqual(["rejected", "fulfilled"]);
+    expect(delivered.verification.has(success)).toBe(true);
+    expect(delivered.verification.has(failed)).toBe(false);
+    delivered.failedVerification.delete(failed);
+  });
+
+  it("sin configuración signup falla antes de crear el usuario", async () => {
+    const email = uniqueEmail("missing-config");
+    delivered.configured = false;
+    try {
+      await expectAuthFailure(auth.api.signUpEmail({ body: { name: "Cliente", email, password } }), "EMAIL_NOT_CONFIGURED");
+      expect(await prisma.user.count({ where: { email } })).toBe(0);
+    } finally { delivered.configured = true; }
+  });
+
+  it("fallo de reset se devuelve como error sin autorizar sesión", async () => {
+    const { email, user } = await signupAndVerify("reset-delivery");
+    delivered.failedReset.add(email);
+    await expectAuthFailure(auth.api.requestPasswordReset({ body: { email } }), "EMAIL_DELIVERY_FAILED");
+    expect(await prisma.session.count({ where: { userId: user.id } })).toBe(1); // auto-login al verificar, sin nueva sesión por reset
+    delivered.failedReset.delete(email);
+  });
+
+  it("login limita fallos a diez por cinco minutos sin depender del correo", async () => {
+    const { email } = await signupAndVerify("login-limit");
+    delivered.configured = false;
+    try {
+      await login(email);
+      for (let attempt = 1; attempt < 10; attempt++) {
+        await expectAuthFailure(auth.api.signInEmail({ body: { email, password: "WrongFixture123!" } }), "INVALID_EMAIL_OR_PASSWORD");
+      }
+      await expectAuthFailure(auth.api.signInEmail({ body: { email: email.toUpperCase(), password } }), "RATE_LIMITED");
+    } finally { delivered.configured = true; }
   });
 });
