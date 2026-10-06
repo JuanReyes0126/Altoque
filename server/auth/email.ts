@@ -1,6 +1,7 @@
 /** Transporte transaccional real. Nunca imprime destinatarios, cuerpos ni enlaces. */
 import { z } from "zod";
 import { env } from "../config/env.js";
+import { verificationDeliveryURL } from "./verification-link.js";
 
 export const VERIFICATION_EXPIRES_SECONDS = 60 * 60;
 export const RESET_PASSWORD_EXPIRES_SECONDS = 60 * 60;
@@ -95,11 +96,12 @@ export async function sendEmail(email: OutgoingEmail): Promise<void> {
 }
 
 export const verificationEmail = async ({ user, url }: { user: { email: string; name: string }; url: string }) => {
+  const deliveryURL = verificationDeliveryURL(url);
   await sendEmail({
     to: user.email,
     subject: "Verifica tu correo — Altoque",
-    text: `Hola ${user.name},\n\nConfirma tu correo para activar tu cuenta en Altoque:\n${url}\n\nEl enlace expira en 1 hora. Si no creaste esta cuenta, ignora este mensaje.`,
-    html: accountEmailHTML(user.name, url, false),
+    text: `Hola ${user.name},\n\nConfirma tu correo para activar tu cuenta en Altoque:\n${deliveryURL}\n\nEl enlace expira en 1 hora. Si no creaste esta cuenta, ignora este mensaje.`,
+    html: accountEmailHTML(user.name, deliveryURL, false),
   });
 };
 

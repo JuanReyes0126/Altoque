@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { assertEmailConfigured, EMAIL_TIMEOUT_MS, sendEmail, verificationEmail } from "../auth/email.js";
+import { assertEmailConfigured, EMAIL_TIMEOUT_MS, resetPasswordEmail, sendEmail, verificationEmail } from "../auth/email.js";
+import { verificationRequest } from "../auth/verification-link.js";
 
 const configuration = vi.hoisted(() => ({
   RESEND_API_KEY: "re_test_key_only", EMAIL_FROM: "Altoque <no-reply@example.com>",
@@ -75,7 +76,7 @@ describe("Correo transaccional · transporte real con fetch simulado", () => {
     const logs = ["log", "info", "warn", "error"] as const;
     const spies = logs.map((method) => vi.spyOn(console, method).mockImplementation(() => {}));
     fetchMock.mockResolvedValueOnce(Response.json({ id: "message-id" }));
-    await verificationEmail({ user: { name: "Cliente", email: email.to }, url: "https://example.com/verify?token=test-token" });
+    await verificationEmail({ user: { name: "Cliente", email: email.to }, url: "https://example.com/api/v1/auth/verify-email?token=test-token" });
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body.text.includes("1 hora") && !body.text.includes("24 horas")).toBe(true);
     fetchMock.mockRejectedValueOnce(new Error("test-token/private-email"));
@@ -94,7 +95,25 @@ describe("Correo transaccional · transporte real con fetch simulado", () => {
     expect(body.html.includes("El equipo de Altoque")).toBe(true);
     expect(body.html.includes("&amp;callbackURL=%2F")).toBe(true);
     expect(body.html.includes("&lt;img") && !body.html.includes("<img")).toBe(true);
-    expect(body.text.includes(url)).toBe(true);
+    const links = [...body.html.matchAll(/href="([^"]+)"/g)].map((match) =>
+      new URL(String(match[1]).replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'")),
+    );
+    expect(links.length).toBe(2);
+    expect(links.every((link) => !link.searchParams.has("token")
+      && link.searchParams.get("verification_token") === "test-token"
+      && link.searchParams.get("callbackURL") === "/")).toBe(true);
+    expect(links.every((link) => body.text.includes(link.toString()))).toBe(true);
+    const normalized = new URL(verificationRequest(new Request(links[0])).url);
+    expect(normalized.toString() === new URL(url).toString()).toBe(true);
     expect(body.html.includes("altoquerd.do") || body.html.includes("altoque.do")).toBe(false);
+  });
+
+  it("reset conserva el enlace original de Better Auth sin cambiar token ni callback", async () => {
+    fetchMock.mockResolvedValueOnce(Response.json({ id: "message-id" }));
+    const url = "https://preview.example/api/v1/auth/reset-password/test-reset-marker?callbackURL=%2F";
+    await resetPasswordEmail({ user: { name: "Cliente", email: email.to }, url });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.text.includes(url) && body.html.includes(url)).toBe(true);
+    expect(body.text.includes("verification_token") || body.html.includes("verification_token")).toBe(false);
   });
 });

@@ -12,6 +12,7 @@ import { ZodError } from "zod";
 // Node ESM exige extensión explícita en imports relativos:
 // "./x.js" resuelve al .ts en compilación y al .js emitido en runtime.
 import { auth } from "./auth/auth.js";
+import { verificationRequest } from "./auth/verification-link.js";
 import type { AuthEnv } from "./middleware/auth.js";
 import { accessLog, originCheck, requestId, securityHeaders } from "./middleware/security.js";
 import { AppError } from "./lib/errors.js";
@@ -80,10 +81,10 @@ app.on(["GET", "POST"], "/api/v1/auth/*", async (c) => {
   // ⚠️ TEMPORAL (debug F1.8): registramos también cuándo el handler
   // DEVUELVE la Response o si RECHAZA — si "start" aparece sin "done",
   // la promesa de Better Auth no se asentó (hang confirmado).
-  // Montaje oficial directo: c.req.raw pasa a Better Auth sin envolver
-  // (los wrappers de body/hooks que lo interceptaban fueron retirados).
+  // Los requests normales pasan intactos a Better Auth. Sólo el alias de
+  // verificación GET se normaliza en la URL, sin volver a envolver bodies.
   try {
-    const res = await auth.handler(c.req.raw);
+    const res = await auth.handler(verificationRequest(c.req.raw));
     if (diagEnabled()) {
       log.info("[diag] auth.handler → done", { requestId: rid, status: res.status });
     }
