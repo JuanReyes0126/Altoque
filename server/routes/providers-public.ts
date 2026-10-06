@@ -123,16 +123,13 @@ providerPublicRoutes.get("/:id", async (c) => {
       throw AppError.notFound("Proveedor");
     }
 
-    // Calcular rating promedio de todas las reviews
-    const allReviews = await prisma.review.findMany({
+    // PostgreSQL devuelve un único agregado, sin transferir todo el historial.
+    const ratingSummary = await prisma.review.aggregate({
       where: { provider_id: provider.id },
-      select: { rating: true },
+      _avg: { rating: true },
+      _count: { _all: true },
     });
-
-    const ratings = allReviews.map((r) => r.rating);
-    const avgRating = ratings.length > 0
-      ? ratings.reduce((sum, r) => sum + r, 0) / ratings.length
-      : 0;
+    const avgRating = ratingSummary._avg.rating ?? 0;
 
     // Transformar para respuesta pública
     const publicProvider = {
@@ -143,7 +140,7 @@ providerPublicRoutes.get("/:id", async (c) => {
       bio: provider.bio,
       years_exp: provider.years_exp,
       rating: Math.round(avgRating * 10) / 10,
-      reviews_count: allReviews.length,
+      reviews_count: ratingSummary._count._all,
       is_available: provider.is_available,
       avg_eta_min: provider.avg_eta_min,
       categories: provider.provider_service.map((ps) => ({
