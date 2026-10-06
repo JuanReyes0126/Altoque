@@ -34,7 +34,7 @@ disputeRoutes.get("/admin/all", requireAuth, requireVerifiedEmail, requirePermis
       where,
       skip,
       take: limit,
-      orderBy: { created_at: "desc" },
+      orderBy: [{ created_at: "desc" }, { id: "desc" }],
       include: {
         request: {
           include: {

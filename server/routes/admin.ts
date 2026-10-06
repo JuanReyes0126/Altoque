@@ -84,7 +84,7 @@ adminRoutes.get("/users", requireAuth, requireVerifiedEmail, requirePermission("
       where,
       skip,
       take: limit,
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       select: {
         id: true,
         name: true,
@@ -169,7 +169,7 @@ adminRoutes.get("/providers", requireAuth, requireVerifiedEmail, requirePermissi
       where,
       skip,
       take: limit,
-      orderBy: { created_at: "desc" },
+      orderBy: [{ created_at: "desc" }, { id: "desc" }],
       include: {
         user: {
           select: { id: true, name: true, email: true },
@@ -267,7 +267,7 @@ adminRoutes.get("/requests", requireAuth, requireVerifiedEmail, requirePermissio
       where,
       skip,
       take: limit,
-      orderBy: { created_at: "desc" },
+      orderBy: [{ created_at: "desc" }, { id: "desc" }],
       include: {
         customer: {
           select: { id: true, name: true, email: true },
@@ -329,7 +329,7 @@ adminRoutes.get("/audit", requireAuth, requireVerifiedEmail, requirePermission("
       where,
       skip,
       take: limit,
-      orderBy: { at: "desc" },
+      orderBy: [{ at: "desc" }, { id: "desc" }],
       include: {
         actor: {
           select: { id: true, name: true, email: true },

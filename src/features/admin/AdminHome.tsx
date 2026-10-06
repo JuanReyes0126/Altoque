@@ -2,7 +2,7 @@
    ALTOQUE · Admin Dashboard (F6)
    Panel administrativo funcional conectado a endpoints reales.
    ════════════════════════════════════════════════════════════════ */
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "../../components/icons";
 import { useToast } from "../../components/Toast";
@@ -12,6 +12,8 @@ import { endCurrentSession } from "../../lib/session-actions";
 import { PATHS } from "../../lib/router";
 import { useApiPolling } from "../../lib/use-api-polling";
 import { AdminDataState } from "./AdminDataState";
+import { AdminPageView } from "./AdminPagination";
+import { useAdminPagination } from "./use-admin-pagination";
 
 type AdminTab = "dashboard" | "users" | "providers" | "requests" | "disputes" | "audit";
 
@@ -139,12 +141,11 @@ function DashboardView({ metrics }: { metrics: any }) {
 }
 
 function UsersView() {
-  const { data: result, loading, error, retry } = useApiPolling(api.admin.getUsers);
-  const users = result?.data ?? [];
-
-  if (loading || error || users.length === 0) return <AdminDataState loading={loading} error={error} empty={users.length === 0} label="usuarios" onRetry={retry} />;
+  const list = useAdminPagination(api.admin.getUsers);
+  const users = list.data;
 
   return (
+    <AdminPageView {...list} rowCount={users.length} label="usuarios" onPage={list.goToPage} onRetry={list.retry}>
     <div className="card overflow-x-auto">
       <table className="w-full">
         <thead className="bg-tint border-b border-line2">
@@ -190,37 +191,42 @@ function UsersView() {
         </tbody>
       </table>
     </div>
+    </AdminPageView>
   );
 }
 
 function ProvidersView() {
-  const { data: result, loading, error, retry } = useApiPolling(api.admin.getProviders);
-  const providers = result?.data ?? [];
+  const list = useAdminPagination(api.admin.getProviders);
+  const providers = list.data;
+  const [busy, setBusy] = useState(false);
   const toast = useToast();
 
   const handleApprove = async (id: string) => {
+    if (busy) return;
+    setBusy(true);
     try {
       await api.admin.approveProvider(id);
-      retry();
+      list.retry();
       toast.showToast("success", "Proveedor aprobado correctamente");
     } catch (err) {
       toast.showToast("error", "Error al aprobar el proveedor");
-    }
+    } finally { setBusy(false); }
   };
 
   const handleReject = async (id: string) => {
+    if (busy) return;
+    setBusy(true);
     try {
       await api.admin.rejectProvider(id, "Rechazado por administrador");
-      retry();
+      list.retry();
       toast.showToast("success", "Proveedor rechazado correctamente");
     } catch (err) {
       toast.showToast("error", "Error al rechazar el proveedor");
-    }
+    } finally { setBusy(false); }
   };
 
-  if (loading || error || providers.length === 0) return <AdminDataState loading={loading} error={error} empty={providers.length === 0} label="proveedores" onRetry={retry} />;
-
   return (
+    <AdminPageView {...list} rowCount={providers.length} label="proveedores" disabled={busy} onPage={list.goToPage} onRetry={list.retry}>
     <div className="space-y-3">
       {providers.map((p) => (
         <div key={p.id} className="card p-5">
@@ -243,10 +249,10 @@ function ProvidersView() {
             </div>
             {p.verification_status === "pending_verification" && (
               <div className="flex gap-2">
-                <button onClick={() => handleApprove(p.id)} className="btn-pine h-9 px-4 text-[0.78rem]">
+                <button disabled={busy} onClick={() => handleApprove(p.id)} className="btn-pine h-9 px-4 text-[0.78rem]">
                   Aprobar
                 </button>
-                <button onClick={() => handleReject(p.id)} className="btn-ghost h-9 px-4 text-[0.78rem] text-cor border-cor/30">
+                <button disabled={busy} onClick={() => handleReject(p.id)} className="btn-ghost h-9 px-4 text-[0.78rem] text-cor border-cor/30">
                   Rechazar
                 </button>
               </div>
@@ -255,16 +261,16 @@ function ProvidersView() {
         </div>
       ))}
     </div>
+    </AdminPageView>
   );
 }
 
 function RequestsView() {
-  const { data: result, loading, error, retry } = useApiPolling(api.admin.getRequests);
-  const requests = result?.data ?? [];
-
-  if (loading || error || requests.length === 0) return <AdminDataState loading={loading} error={error} empty={requests.length === 0} label="solicitudes" onRetry={retry} />;
+  const list = useAdminPagination(api.admin.getRequests);
+  const requests = list.data;
 
   return (
+    <AdminPageView {...list} rowCount={requests.length} label="solicitudes" onPage={list.goToPage} onRetry={list.retry}>
     <div className="space-y-3">
       {requests.map((r) => (
         <div key={r.id} className="card p-5">
@@ -290,63 +296,33 @@ function RequestsView() {
         </div>
       ))}
     </div>
+    </AdminPageView>
   );
 }
 
 function DisputesView() {
-  const [disputes, setDisputes] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const list = useAdminPagination(api.admin.getDisputes);
+  const disputes = list.data;
   const [resolveModal, setResolveModal] = useState<any>(null);
   const toast = useToast();
-
-  useEffect(() => {
-    loadDisputes();
-  }, []);
-
-  const loadDisputes = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const res = await api.admin.getDisputes();
-      setDisputes(res.data);
-    } catch (err) {
-      setError("Error al cargar disputas");
-      toast.showToast("error", "Error al cargar la lista de disputas");
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleResolve = async (disputeId: string, status: "resolved_customer" | "resolved_provider", resolution: string) => {
     try {
       await api.admin.resolveDispute(disputeId, status, resolution);
       toast.showToast("success", "Disputa resuelta correctamente");
       setResolveModal(null);
-      loadDisputes(); // Recargar lista
+      list.retry();
     } catch (err) {
       toast.showToast("error", "Error al resolver la disputa");
       throw err;
     }
   };
 
-  if (loading) return <div className="text-center py-12 text-mut">Cargando disputas...</div>;
-
-  if (error) {
-    return (
-      <div className="text-center py-12">
-        <p className="text-cor font-bold mb-3">{error}</p>
-        <button onClick={loadDisputes} className="btn-ghost h-10 px-5 text-[0.85rem]">Reintentar</button>
-      </div>
-    );
-  }
-
   return (
+    <>
+    <AdminPageView {...list} rowCount={disputes.length} label="disputas" onPage={list.goToPage} onRetry={list.retry}>
     <div className="space-y-3">
-      {disputes.length === 0 ? (
-        <div className="text-center py-12 text-mut">No hay disputas registradas</div>
-      ) : (
-        disputes.map((d) => (
+      {disputes.map((d) => (
           <div key={d.id} className="card p-5">
             <div className="flex items-start gap-4">
               <div className="flex-1">
@@ -391,8 +367,9 @@ function DisputesView() {
               )}
             </div>
           </div>
-        ))
-      )}
+        ))}
+    </div>
+    </AdminPageView>
 
       {/* Modal de resolución de disputa */}
       {resolveModal && (
@@ -402,7 +379,7 @@ function DisputesView() {
           onResolve={handleResolve}
         />
       )}
-    </div>
+    </>
   );
 }
 
@@ -548,12 +525,11 @@ function ResolveDisputeModal({ dispute, onClose, onResolve }: { dispute: any; on
 }
 
 function AuditView() {
-  const { data: result, loading, error, retry } = useApiPolling(api.admin.getAuditLogs);
-  const logs = result?.data ?? [];
-
-  if (loading || error || logs.length === 0) return <AdminDataState loading={loading} error={error} empty={logs.length === 0} label="registros de auditoría" onRetry={retry} />;
+  const list = useAdminPagination(api.admin.getAuditLogs);
+  const logs = list.data;
 
   return (
+    <AdminPageView {...list} rowCount={logs.length} label="registros de auditoría" onPage={list.goToPage} onRetry={list.retry}>
     <div className="card overflow-x-auto">
       <table className="w-full">
         <thead className="bg-tint border-b border-line2">
@@ -580,6 +556,7 @@ function AuditView() {
         </tbody>
       </table>
     </div>
+    </AdminPageView>
   );
 }
 
