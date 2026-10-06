@@ -1,19 +1,24 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "../../components/icons";
-import { Face, FadeUp, JobPhoto, MapCard, Stars, Toggle, useCountdown } from "../../components/ui/kit";
+import { Face, FadeUp, JobPhoto, MapCard, Stars, useCountdown } from "../../components/ui/kit";
 import { useToast } from "../../components/Toast";
 import {
-  catById, clearSession, fmt,
+  catById, fmt,
   setRole, useApp, zoneById,
 } from "../../lib/state";
-import { api, authApi } from "../../lib/api";
+import { api } from "../../lib/api";
+import { endCurrentSession } from "../../lib/session-actions";
+import { ApiHttpError } from "../../lib/http";
 import { PATHS } from "../../lib/router";
 import { ProDisputeModal } from "./ProDisputeModal";
 import { ProDisputeView } from "./ProDisputeView";
+import { ProviderAvailabilityControl, ProviderInboxState, type ProviderLoadStatus } from "./ProviderPanelStates";
+import { ProviderProfileSetup } from "./ProviderProfileSetup";
 
 type ProTab = "home" | "activity" | "me";
 const ETAS = [10, 15, 20, 30, 45, 60];
+const loadErrorMessage = (error: unknown, fallback: string) => error instanceof ApiHttpError ? error.message : fallback;
 
 export function ProApp() {
   const s = useApp();
@@ -25,93 +30,152 @@ export function ProApp() {
   const [activeJob, setActiveJob] = useState<any>(null);
   const [etaFor, setEtaFor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [profileError, setProfileError] = useState<{ missing: boolean; message: string } | null>(null);
+  const [profileReload, setProfileReload] = useState(0);
+  const [inboxStatus, setInboxStatus] = useState<ProviderLoadStatus>("idle");
+  const [inboxError, setInboxError] = useState<string | null>(null);
+  const [inboxReload, setInboxReload] = useState(0);
+  const [activeJobStatus, setActiveJobStatus] = useState<ProviderLoadStatus>("idle");
+  const [activeJobError, setActiveJobError] = useState<string | null>(null);
+  const [activeJobReload, setActiveJobReload] = useState(0);
+  const [availabilityBusy, setAvailabilityBusy] = useState(false);
+  const availabilityPending = useRef(false);
+  const [jobBusy, setJobBusy] = useState(false);
+  const jobPending = useRef(false);
+  const providerId = providerProfile?.id;
+  const verified = providerProfile?.verification_status === "verified";
+  const available = !!providerProfile?.is_available;
 
-  // F3: Cargar perfil del proveedor desde el backend
+  // El perfil persistido decide qué operaciones están habilitadas.
   useEffect(() => {
+    let mounted = true;
+    setLoading(true);
+    setProfileError(null);
     api.providers.getMe()
       .then((profile) => {
+        if (!mounted) return;
         setProviderProfile(profile);
-        setLoading(false);
       })
-      .catch(() => setLoading(false));
-  }, []);
+      .catch((error: unknown) => {
+        if (!mounted) return;
+        setProviderProfile(null);
+        setProfileError({
+          missing: error instanceof ApiHttpError && error.status === 404,
+          message: loadErrorMessage(error, "No pudimos cargar tu perfil profesional."),
+        });
+      })
+      .finally(() => { if (mounted) setLoading(false); });
+    return () => { mounted = false; };
+  }, [profileReload]);
 
-  // F3: Cargar inbox de solicitudes
+  // Un inbox vacío es éxito; nunca consulta mientras falta el perfil o su aprobación.
   useEffect(() => {
+    let mounted = true;
+    let pending = false;
+    setInbox([]);
+    setInboxError(null);
+    setInboxStatus("idle");
+    if (!providerId || !verified || !available) return;
+    setInboxStatus("loading");
     const loadInbox = async () => {
+      if (pending) return;
+      pending = true;
       try {
         const res = await api.providers.getInbox();
-        setInbox(res.data);
-      } catch (error) {
-        toast.showToast("error", "Error al cargar solicitudes disponibles");
+        if (mounted) {
+          setInbox(res.data);
+          setInboxError(null);
+          setInboxStatus("success");
+        }
+      } catch (error: unknown) {
+        if (mounted) {
+          setInboxError(loadErrorMessage(error, "Revisa tu conexión e inténtalo de nuevo."));
+          setInboxStatus("error");
+        }
+      } finally {
+        pending = false;
       }
     };
 
-    loadInbox();
+    void loadInbox();
     const interval = setInterval(loadInbox, 10000);
-    return () => clearInterval(interval);
-  }, []);
+    return () => { mounted = false; clearInterval(interval); };
+  }, [providerId, verified, available, inboxReload]);
 
-  // F3: Cargar trabajo activo si existe
+  // No confundir un error al comprobar el trabajo activo con una respuesta job:null.
   useEffect(() => {
-    let isFirstLoad = true;
-    
+    let mounted = true;
+    let pending = false;
+    setActiveJobError(null);
+    setActiveJobStatus("idle");
+    if (!providerId || !verified) return;
+    setActiveJobStatus("loading");
     const loadActiveJob = async () => {
+      if (pending) return;
+      pending = true;
       try {
         const res = await api.providers.getActiveJob();
-        // Respuesta legítima: puede tener job o null
-        setActiveJob(res.data?.job || null);
-        isFirstLoad = false;
-      } catch (error) {
-        // Error real de API/red
-        if (isFirstLoad) {
-          // Solo mostrar error en la primera carga
-          toast.showToast("error", "Error al cargar trabajo activo");
+        if (mounted) {
+          setActiveJob(res.data.job);
+          setActiveJobError(null);
+          setActiveJobStatus("success");
         }
-        // En polling, no perder datos válidos ya cargados
-        isFirstLoad = false;
+      } catch (error: unknown) {
+        if (mounted) {
+          setActiveJobError(loadErrorMessage(error, "No pudimos comprobar tu trabajo activo."));
+          setActiveJobStatus("error");
+        }
+      } finally {
+        pending = false;
       }
     };
 
-    loadActiveJob();
+    void loadActiveJob();
     const interval = setInterval(loadActiveJob, 5000);
-    return () => clearInterval(interval);
-  }, []);
+    return () => { mounted = false; clearInterval(interval); };
+  }, [providerId, verified, activeJobReload]);
 
-  const handleToggleAvailability = async () => {
-    if (!providerProfile) return;
+  const handleToggleAvailability = async (newAvailability: boolean) => {
+    if (!providerProfile || !verified || availabilityPending.current) return;
+    availabilityPending.current = true;
+    setAvailabilityBusy(true);
     try {
-      const newAvailability = !providerProfile.is_available;
-      await api.providers.setAvailability(newAvailability);
-      setProviderProfile({ ...providerProfile, is_available: newAvailability });
-    } catch (error) {
-      toast.showToast("error", "Error al cambiar disponibilidad");
+      const saved = await api.providers.setAvailability(newAvailability);
+      setProviderProfile((current: any) => current ? { ...current, is_available: saved.is_available } : current);
+    } catch (error: unknown) {
+      toast.showToast("error", loadErrorMessage(error, "Error al cambiar disponibilidad"));
+    } finally {
+      availabilityPending.current = false;
+      setAvailabilityBusy(false);
     }
   };
 
   const handleAcceptJob = async (requestId: string, eta: number) => {
+    if (jobPending.current) return;
+    jobPending.current = true;
+    setJobBusy(true);
     try {
       await api.providers.claim(requestId, eta);
-      setEtaFor(null);
-      toast.showToast("success", "Trabajo aceptado correctamente");
-      // Recargar inbox y trabajo activo
-      const [inboxRes, activeRes] = await Promise.all([
-        api.providers.getInbox(),
-        api.providers.getActiveJob(),
-      ]);
-      setInbox(inboxRes.data);
-      if (activeRes.data) setActiveJob(activeRes.data);
-    } catch (error) {
-      toast.showToast("error", "Error al aceptar el trabajo");
+    } catch (error: unknown) {
+      toast.showToast("error", loadErrorMessage(error, "Error al aceptar el trabajo"));
+      return;
+    } finally {
+      jobPending.current = false;
+      setJobBusy(false);
     }
+    setEtaFor(null);
+    toast.showToast("success", "Trabajo aceptado correctamente");
+    setActiveJobStatus("loading");
+    setInboxReload((value) => value + 1);
+    setActiveJobReload((value) => value + 1);
   };
 
   const handleRejectJob = async (requestId: string) => {
-    setInbox(inbox.filter((inc) => inc.id !== requestId));
+    setInbox((current) => current.filter((inc) => inc.id !== requestId));
   };
 
   const handleAdvanceJob = async () => {
-    if (!activeJob) return;
+    if (!activeJob || jobPending.current || activeJobStatus !== "success") return;
     const statusMap: Record<string, string> = {
       accepted: "on_the_way",
       on_the_way: "arrived",
@@ -122,18 +186,20 @@ export function ProApp() {
 
     if (!nextStatus) return;
 
+    jobPending.current = true;
+    setJobBusy(true);
     try {
       await api.providers.updateStatus(activeJob.id, nextStatus);
-      toast.showToast("success", "Estado actualizado correctamente");
-      const res = await api.providers.getActiveJob();
-      if (res.data) {
-        setActiveJob(res.data);
-      } else {
-        setActiveJob(null);
-      }
-    } catch (error) {
-      toast.showToast("error", "Error al actualizar el estado");
+    } catch (error: unknown) {
+      toast.showToast("error", loadErrorMessage(error, "Error al actualizar el estado"));
+      return;
+    } finally {
+      jobPending.current = false;
+      setJobBusy(false);
     }
+    toast.showToast("success", "Estado actualizado correctamente");
+    setActiveJobStatus("loading");
+    setActiveJobReload((value) => value + 1);
   };
 
   if (loading) {
@@ -144,6 +210,24 @@ export function ProApp() {
             <Icon name="wrench" className="w-8 h-8 text-nmut" strokeWidth={1.7} />
           </div>
           <p className="font-disp font-bold text-[1.1rem] text-ntxt mt-5">Cargando panel...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!providerProfile) {
+    const backToProfile = () => { setRole("customer"); nav(`${PATHS.app}/perfil`); };
+    if (profileError?.missing) {
+      return <ProviderProfileSetup onCreated={() => setProfileReload((value) => value + 1)} onBack={backToProfile} />;
+    }
+    return (
+      <div className="min-h-dvh bg-night text-ntxt grid place-items-center px-5">
+        <div className="ncard p-8 text-center max-w-md" role="alert">
+          <Icon name="wrench" className="w-8 h-8 text-namber mx-auto" strokeWidth={1.7} />
+          <h1 className="font-disp font-bold text-xl mt-4">No pudimos cargar tu panel</h1>
+          <p className="text-[0.85rem] text-nmut mt-3">{profileError?.message}</p>
+          <button type="button" onClick={() => setProfileReload((value) => value + 1)} className="btn-ghost-dark w-full h-11 mt-5">Reintentar</button>
+          <button type="button" onClick={backToProfile} className="btn-ghost-dark w-full h-11 mt-3">Volver a mi perfil</button>
         </div>
       </div>
     );
@@ -170,45 +254,40 @@ export function ProApp() {
 
         {/* availability switch */}
         <FadeUp>
-          <section className={`ncard mt-5 p-5 flex items-center gap-4 transition-colors ${providerProfile?.is_available ? "border-[#2e5c43]" : ""}`}>
-            <div className="flex-1">
-              <h2 className="font-disp font-bold text-[1.2rem] leading-tight">¿Estás disponible?</h2>
-              <p className={`text-[0.78rem] font-semibold mt-1 ${providerProfile?.is_available ? "text-[#4ade80]" : "text-nmut"}`}>
-                {providerProfile?.is_available ? "Recibiendo solicitudes cerca de ti" : "No recibirás nuevas solicitudes"}
-              </p>
-            </div>
-            <Toggle on={providerProfile?.is_available || false} onChange={handleToggleAvailability} label="Disponibilidad" />
-          </section>
+          <ProviderAvailabilityControl available={available} verified={verified} busy={availabilityBusy} onChange={handleToggleAvailability} />
         </FadeUp>
 
         {tab === "home" && (
           <>
+            {activeJobStatus === "error" && (
+              <div className="ncard mt-7 p-5" role="alert">
+                <p className="font-bold">No pudimos comprobar tu trabajo activo</p>
+                <p className="text-[0.8rem] text-nmut mt-2">{activeJobError}</p>
+                <button type="button" onClick={() => setActiveJobReload((value) => value + 1)} className="btn-ghost-dark h-11 px-5 mt-3">Reintentar</button>
+              </div>
+            )}
             {/* active job */}
             {activeJob ? (
-              <ActiveJob job={activeJob} onAdvance={handleAdvanceJob} />
-            ) : (
+              <ActiveJob job={activeJob} onAdvance={handleAdvanceJob} busy={jobBusy || activeJobStatus !== "success"} />
+            ) : verified && (activeJobStatus === "idle" || activeJobStatus === "loading") ? (
+              <div className="ncard p-8 mt-7 text-center text-nmut" role="status">Comprobando trabajo activo…</div>
+            ) : activeJobStatus === "error" ? null : (
               <>
                 {/* incoming requests */}
                 <section className="mt-7">
                   <div className="flex items-center justify-between mb-3.5">
                     <h3 className="font-disp font-bold text-[1.05rem]">Solicitudes cerca de ti</h3>
-                    <span className="text-[0.7rem] font-extrabold text-namber bg-[#332a14] rounded-full px-2.5 py-1">{inbox.length} nuevas</span>
+                    {inboxStatus === "success" && <span className="text-[0.7rem] font-extrabold text-namber bg-[#332a14] rounded-full px-2.5 py-1">{inbox.length} nuevas</span>}
                   </div>
 
-                  {!providerProfile?.is_available ? (
-                    <div className="ncard p-8 text-center">
-                      <span className="w-14 h-14 rounded-2xl bg-nsurf text-nmut grid place-items-center mx-auto"><Icon name="bell" className="w-7 h-7" strokeWidth={1.7} /></span>
-                      <p className="font-disp font-bold text-[1rem] mt-4">Estás fuera de línea</p>
-                      <p className="text-[0.8rem] text-nmut font-medium mt-1">Activa tu disponibilidad para recibir trabajos.</p>
-                    </div>
-                  ) : inbox.length === 0 ? (
-                    <div className="ncard p-8 text-center">
-                      <span className="w-14 h-14 rounded-2xl bg-nsurf text-namber grid place-items-center mx-auto animate-ride"><Icon name="radar" className="w-7 h-7" strokeWidth={1.7} /></span>
-                      <p className="font-disp font-bold text-[1rem] mt-4">Buscando solicitudes…</p>
-                      <p className="text-[0.8rem] text-nmut font-medium mt-1">Te avisaremos apenas llegue un trabajo en tu zona.</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
+                  <ProviderInboxState
+                    verificationStatus={providerProfile.verification_status}
+                    available={available}
+                    status={inboxStatus}
+                    error={inboxError}
+                    count={inbox.length}
+                    onRetry={() => setInboxReload((value) => value + 1)}
+                  >
                       {inbox.map((inc, i) => (
                         <IncomingCard
                           key={inc.id}
@@ -218,8 +297,7 @@ export function ProApp() {
                           onReject={() => handleRejectJob(inc.id)}
                         />
                       ))}
-                    </div>
-                  )}
+                  </ProviderInboxState>
                 </section>
               </>
             )}
@@ -241,8 +319,9 @@ export function ProApp() {
               {ETAS.map((e) => (
                 <button
                   key={e}
+                  disabled={jobBusy}
                   onClick={() => handleAcceptJob(etaFor, e)}
-                  className="ncard h-16 grid place-items-center hover:border-namber transition-colors group"
+                  className="ncard h-16 grid place-items-center hover:border-namber transition-colors group disabled:opacity-50"
                 >
                   <span className="text-center">
                     <span className="block font-disp font-bold text-[1.15rem] text-ntxt group-hover:text-namber">{e}</span>
@@ -282,8 +361,8 @@ export function ProApp() {
 
 /* ── incoming request card ── */
 function IncomingCard({ inc, delay, onAccept, onReject }: { inc: any; delay: number; onAccept: () => void; onReject: () => void }) {
-  const cat = catById(inc.category_id);
-  const zone = zoneById(inc.zone_id);
+  const cat = inc.category;
+  const zone = inc.zone;
 
   return (
     <FadeUp d={delay}>
@@ -310,7 +389,7 @@ function IncomingCard({ inc, delay, onAccept, onReject }: { inc: any; delay: num
             {inc.customer?.name?.charAt(0) || "C"}
           </span>
           <p className="text-[0.8rem] font-bold text-ntxt">{inc.customer?.name || "Cliente"}</p>
-          <span className="text-[0.72rem] text-nmut font-semibold inline-flex items-center gap-0.5"><span className="text-namber">★</span>4.8</span>
+
         </div>
 
         <div className="flex gap-3 mt-4">
@@ -325,11 +404,11 @@ function IncomingCard({ inc, delay, onAccept, onReject }: { inc: any; delay: num
 }
 
 /* ── active job (in progress) ── */
-function ActiveJob({ job, onAdvance }: { job: any; onAdvance: () => void }) {
-  const cat = catById(job.category_id);
-  const zone = zoneById(job.zone_id);
+function ActiveJob({ job, onAdvance, busy }: { job: any; onAdvance: () => void; busy: boolean }) {
+  const cat = job.category;
+  const zone = job.zone;
   const [disputeOpen, setDisputeOpen] = useState(false);
-  const [disputeExists, setDisputeExists] = useState(false);
+  const [disputeExists, setDisputeExists] = useState(true);
   const [disputeKey, setDisputeKey] = useState(0);
   const steps = [
     { k: "on_the_way", l: "Ir hacia el cliente", ic: "car" },
@@ -338,7 +417,7 @@ function ActiveJob({ job, onAdvance }: { job: any; onAdvance: () => void }) {
     { k: "completed", l: "Completado", ic: "check" },
   ];
   const idx = steps.findIndex((x) => x.k === job.status);
-  const actionLabel = job.status === "on_the_way" ? "He llegado" : job.status === "arrived" ? "Iniciar servicio" : "Completar servicio";
+  const actionLabel = job.status === "accepted" ? "Ir hacia el cliente" : job.status === "on_the_way" ? "He llegado" : job.status === "arrived" ? "Iniciar servicio" : "Completar servicio";
 
   return (
     <section className="mt-7">
@@ -377,8 +456,8 @@ function ActiveJob({ job, onAdvance }: { job: any; onAdvance: () => void }) {
             {steps[idx]?.l || "En progreso"}
           </p>
 
-          <button onClick={onAdvance} className="w-full h-13 py-3.5 mt-4 rounded-[14px] bg-namber text-[#33230a] font-extrabold text-[0.9rem] active:scale-95 transition-transform">
-            {actionLabel}
+          <button onClick={onAdvance} disabled={busy} className="w-full h-13 py-3.5 mt-4 rounded-[14px] bg-namber text-[#33230a] font-extrabold text-[0.9rem] active:scale-95 transition-transform disabled:opacity-50">
+            {busy ? "Actualizando trabajo…" : actionLabel}
           </button>
         </div>
       </FadeUp>
@@ -425,43 +504,25 @@ function ActiveJob({ job, onAdvance }: { job: any; onAdvance: () => void }) {
 /* ── activity tab ── */
 function Activity({ providerId }: { providerId?: string }) {
   const [earnings, setEarnings] = useState<any>(null);
-  const toast = useToast();
-
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [reload, setReload] = useState(0);
   useEffect(() => {
-    if (providerId) {
-      api.providers.getEarnings("week").then(setEarnings).catch(() => toast.showToast("error", "Error al cargar estadísticas"));
-    }
-  }, [providerId]);
-
+    let alive = true;
+    setLoading(true); setError("");
+    if (!providerId) { setLoading(false); return; }
+    api.providers.getEarnings("week")
+      .then((result) => { if (alive) setEarnings(result); })
+      .catch(() => { if (alive) setError("No pudimos cargar las estadísticas."); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [providerId, reload]);
+  if (loading) return <p role="status" className="mt-7 text-nmut">Cargando actividad…</p>;
+  if (error) return <section role="alert" className="ncard p-5 mt-7"><p>{error}</p><button onClick={() => setReload((value) => value + 1)} className="btn-ghost-dark h-11 px-4 mt-3">Reintentar</button></section>;
   return (
-    <div className="mt-7 space-y-5">
-      <div className="grid grid-cols-2 gap-4">
-        <div className="ncard p-5">
-          <p className="text-[0.64rem] font-extrabold uppercase tracking-[0.16em] text-nmut">Servicios hoy</p>
-          <p className="font-disp font-bold text-[1.8rem] text-ntxt mt-1.5 leading-none">{earnings?.completedCount || 0}</p>
-        </div>
-        <div className="ncard p-5">
-          <p className="text-[0.64rem] font-extrabold uppercase tracking-[0.16em] text-nmut">Ganancias hoy</p>
-          <p className="font-disp font-bold text-[1.4rem] text-namber mt-1.5 leading-none">{fmt(earnings?.earnings || 0)}</p>
-        </div>
-      </div>
-
-      <div className="ncard p-5">
-        <div className="flex items-center justify-between mb-1">
-          <p className="text-[0.64rem] font-extrabold uppercase tracking-[0.16em] text-nmut">Tasa de aceptación</p>
-          <p className="font-disp font-bold text-[1rem] text-ntxt">96%</p>
-        </div>
-        <div className="h-2 rounded-full bg-nsurf overflow-hidden mt-2">
-          <div className="h-full rounded-full bg-[#4ade80]" style={{ width: "96%" }} />
-        </div>
-      </div>
-
-      <section>
-        <h3 className="font-disp font-bold text-[1.05rem] mb-3.5">Reseñas recientes</h3>
-        <div className="ncard p-4 text-center text-nmut">
-          <p className="text-[0.8rem]">Las reseñas aparecerán aquí cuando completes servicios.</p>
-        </div>
-      </section>
+    <div className="mt-7 grid sm:grid-cols-2 gap-4">
+      <section className="ncard p-5"><h2 className="text-sm text-nmut font-bold">Servicios esta semana</h2><p className="font-disp font-bold text-3xl mt-3">{earnings?.completedCount ?? 0}</p></section>
+      <section className="ncard p-5"><h2 className="text-sm text-nmut font-bold">Ingresos registrados esta semana</h2><p className="font-disp font-bold text-2xl text-namber mt-3">{fmt(earnings?.earnings ?? 0)}</p><p className="text-xs text-nmut mt-3">El sistema de pagos todavía no está habilitado.</p></section>
     </div>
   );
 }
@@ -470,6 +531,7 @@ function Activity({ providerId }: { providerId?: string }) {
 function ProMe({ profile }: { profile: any }) {
   const s = useApp();
   const nav = useNavigate();
+  const toast = useToast();
 
   return (
     <div className="mt-7 space-y-5">
@@ -479,7 +541,7 @@ function ProMe({ profile }: { profile: any }) {
           <p className="font-disp font-bold text-[1.1rem] text-ntxt">{profile?.user?.name || "Proveedor"}</p>
           <p className="text-[0.76rem] text-nmut font-semibold mt-0.5">{profile?.business_name || "Servicios profesionales"}</p>
           <p className="text-[0.72rem] font-bold text-namber mt-1 inline-flex items-center gap-1">
-            <span>★</span>4.9 · {profile?.completed_jobs || 0} trabajos
+            {profile?.provider_service?.length || 0} servicios registrados
           </p>
         </div>
       </div>
@@ -496,20 +558,12 @@ function ProMe({ profile }: { profile: any }) {
         </p>
       </div>
 
-      <div className="ncard divide-y divide-nline">
-        {[
-          { ic: "wrench", l: "Mis servicios y zonas" },
-          { ic: "camera", l: "Portfolio y fotos" },
-          { ic: "clock", l: "Horarios de trabajo" },
-          { ic: "shield", l: "Verificación" },
-        ].map((r) => (
-          <button key={r.l} className="w-full flex items-center gap-3.5 px-5 py-4 text-left hover:bg-nsurf/50 transition-colors">
-            <span className="w-9 h-9 rounded-xl bg-nsurf text-nmut grid place-items-center shrink-0"><Icon name={r.ic as never} className="w-4.5 h-4.5" strokeWidth={2} /></span>
-            <span className="flex-1 text-[0.86rem] font-bold text-ntxt">{r.l}</span>
-            <Icon name="chevr" className="w-4 h-4 text-nmut" strokeWidth={2.4} />
-          </button>
-        ))}
-      </div>
+      <section className="ncard p-5">
+        <h2 className="font-bold">Servicios y cobertura</h2>
+        <p className="text-sm text-nmut mt-3">{profile?.provider_service?.map((item: any) => item.category.name).join(" · ") || "Sin servicios registrados"}</p>
+        <p className="text-sm text-nmut mt-2">{profile?.provider_zone?.map((item: any) => item.zone.name).join(" · ") || "Sin zonas registradas"}</p>
+        <p className="text-xs text-nmut mt-4">La edición del perfil, el portfolio y los horarios todavía no están disponibles.</p>
+      </section>
 
       <button onClick={() => { setRole("customer"); nav(PATHS.app); }} className="w-full ncard card-h p-5 flex items-center gap-4 text-left">
         <span className="w-11 h-11 rounded-xl bg-pine text-white grid place-items-center shrink-0"><Icon name="user" className="w-5.5 h-5.5" strokeWidth={1.8} /></span>
@@ -522,9 +576,8 @@ function ProMe({ profile }: { profile: any }) {
 
       <button
         onClick={async () => {
-          await authApi.signOut().catch(() => {});
-          clearSession();
-          nav(PATHS.home);
+          try { await endCurrentSession(); nav(PATHS.home); }
+          catch { toast.showToast("error", "No pudimos cerrar la sesión. Inténtalo nuevamente."); }
         }}
         className="w-full ncard card-h p-5 flex items-center gap-4 text-left border-cor/40"
       >

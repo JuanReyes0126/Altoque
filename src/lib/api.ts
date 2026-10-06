@@ -14,7 +14,7 @@ import {
   CATS, PROS, ZONES, catById, getState,
   proById, prosByCat, searchAll, setProAvailable, toggleFav, zoneById,
 } from "./state";
-import { http } from "./http";
+import { ApiHttpError, http } from "./http";
 import type { Cat, Pro, Role, Session, Zone } from "../types";
 
 export interface ProviderFilters { catId?: string; available?: boolean; verified?: boolean; sort?: "rating" | "dist" | "eta" }
@@ -266,9 +266,13 @@ export const api = {
 
     /** PATCH /api/v1/provider/availability - Cambiar disponibilidad */
     setAvailability: async (is_available: boolean) => {
-      const res = await http<{ data: any }>("/api/v1/provider/availability", {
+      const res = await http<{ data: { is_available: boolean } }>("/api/v1/provider/availability", {
+        method: "PATCH",
         body: { is_available },
       });
+      if (typeof res?.data?.is_available !== "boolean") {
+        throw new ApiHttpError(200, "INVALID_RESPONSE", "No pudimos confirmar tu disponibilidad. Inténtalo nuevamente.");
+      }
       return res.data;
     },
 
@@ -279,20 +283,23 @@ export const api = {
       if (params?.limit) query.set("limit", String(params.limit));
       const qs = query.toString();
       const res = await http<{ data: any[]; meta: any }>(`/api/v1/provider/inbox${qs ? "?" + qs : ""}`);
+      if (!Array.isArray(res?.data)) {
+        throw new ApiHttpError(200, "INVALID_RESPONSE", "No pudimos interpretar las solicitudes disponibles. Inténtalo nuevamente.");
+      }
       return res;
     },
 
-    /** POST /api/v1/requests/:id/claim - Reclamar solicitud */
+    /** POST /api/v1/provider/requests/:id/claim - Reclamar solicitud */
     claim: async (requestId: string, eta_min: number) => {
-      const res = await http<{ data: any }>(`/api/v1/requests/${requestId}/claim`, {
+      const res = await http<{ data: any }>(`/api/v1/provider/requests/${encodeURIComponent(requestId)}/claim`, {
         body: { eta_min },
       });
       return res.data;
     },
 
-    /** POST /api/v1/requests/:id/status - Actualizar estado del trabajo */
+    /** POST /api/v1/provider/requests/:id/status - Actualizar estado del trabajo */
     updateStatus: async (requestId: string, status: string, note?: string) => {
-      const res = await http<{ data: any }>(`/api/v1/requests/${requestId}/status`, {
+      const res = await http<{ data: any }>(`/api/v1/provider/requests/${encodeURIComponent(requestId)}/status`, {
         body: { status, note },
       });
       return res.data;
@@ -307,6 +314,10 @@ export const api = {
     /** GET /api/v1/provider/active-job - Trabajo activo actual */
     getActiveJob: async () => {
       const res = await http<{ data: { job: any } }>("/api/v1/provider/active-job");
+      if (!res?.data || typeof res.data !== "object" || !("job" in res.data)
+        || (res.data.job !== null && (typeof res.data.job !== "object" || typeof res.data.job.id !== "string"))) {
+        throw new ApiHttpError(200, "INVALID_RESPONSE", "No pudimos interpretar el trabajo activo. Inténtalo nuevamente.");
+      }
       return res;
     },
   },
