@@ -29,7 +29,7 @@ requestRoutes.post("/", requireAuth, requireVerifiedEmail, async (c) => {
   const schema = z.object({
     category_id: z.string().min(1),
     zone_id: z.string().min(1),
-    description: z.string().min(1).max(2000),
+    description: z.string().trim().min(1).max(2000),
     when_type: z.enum(["now", "scheduled", "quote"]),
     scheduled_at: z.string().datetime().optional(),
     address_id: z.string().optional(),
@@ -70,8 +70,13 @@ requestRoutes.post("/", requireAuth, requireVerifiedEmail, async (c) => {
   }
 
   // Validar scheduled_at si when_type es "scheduled"
-  if (data.when_type === "scheduled" && !data.scheduled_at) {
-    throw AppError.validation([{ path: "scheduled_at", message: "Requerido cuando when_type es 'scheduled'" }]);
+  if (data.when_type === "scheduled") {
+    if (!data.scheduled_at) {
+      throw AppError.validation([{ path: "scheduled_at", message: "Requerido cuando when_type es 'scheduled'" }]);
+    }
+    if (new Date(data.scheduled_at).getTime() <= Date.now()) {
+      throw AppError.validation([{ path: "scheduled_at", message: "Selecciona una fecha y hora futuras" }]);
+    }
   }
 
   // Crear solicitud en transacción

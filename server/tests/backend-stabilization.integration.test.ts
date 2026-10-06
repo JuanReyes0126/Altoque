@@ -139,6 +139,32 @@ describe.runIf(HAS_DB)("Backend · estabilización de inputs, altas y elegibilid
     expect(await response.json()).toEqual({ data: [], meta: { page: 1, limit: 20, total: 0, pages: 1 } });
   });
 
+  it.each([" ", "\n\t"])("rechaza una descripción sin contenido (%#)", async (description) => {
+    expect((await send("/api/v1/requests", "customer", requestBody({ description }))).status).toBe(400);
+    expect(await prisma.service_request.count({ where: { customer_id: users.customer } })).toBe(0);
+  });
+  it("persiste la descripción recortada sin eliminar su contenido", async () => {
+    const response = await send("/api/v1/requests", "customer", requestBody({ description: "  Contenido real  " }));
+    expect(response.status).toBe(201);
+    expect((await response.json()).data.description).toBe("Contenido real");
+  });
+  it.each([-1, 0])("rechaza una fecha programada pasada o presente con reloj fijo (%i)", async (offset) => {
+    const now = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    const response = await send("/api/v1/requests", "customer", requestBody({ when_type: "scheduled", scheduled_at: new Date(now + offset).toISOString() }));
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.details).toContainEqual(expect.objectContaining({ path: "scheduled_at" }));
+    expect(await prisma.service_request.count({ where: { customer_id: users.customer } })).toBe(0);
+  });
+  it("acepta y conserva una fecha programada futura con reloj fijo", async () => {
+    const now = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    const scheduled_at = new Date(now + 60_000).toISOString();
+    const response = await send("/api/v1/requests", "customer", requestBody({ when_type: "scheduled", scheduled_at }));
+    expect(response.status).toBe(201);
+    expect((await response.json()).data.scheduled_at).toBe(scheduled_at);
+  });
+
   const revocations = ["account", "email", "profile", "category", "zone"] as const;
   async function revoke(kind: typeof revocations[number], providerId: string) {
     if (kind === "account") await prisma.user.update({ where: { id: users.provider }, data: { status: "blocked" } });
