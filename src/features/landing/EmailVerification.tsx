@@ -3,6 +3,15 @@ import { Icon } from "../../components/icons";
 import { authApi } from "../../lib/api";
 import { ApiHttpError } from "../../lib/http";
 
+/** Un error de red o de acceso no demuestra que el enlace haya expirado. */
+export function verificationCompletionError(error: unknown): string {
+  if (error instanceof ApiHttpError) {
+    if (error.code === "ACCOUNT_INACTIVE") return "Esta cuenta no puede iniciar sesión. Contacta al equipo de Altoque.";
+    if (["INVALID_TOKEN", "TOKEN_EXPIRED"].includes(error.code)) return "El enlace de verificación no es válido o expiró";
+  }
+  return "No pudimos completar la verificación. Vuelve a abrir el enlace del correo.";
+}
+
 export function verificationErrorMessage(error: unknown): string {
   if (error instanceof ApiHttpError && error.code === "RATE_LIMITED") {
     return "Has solicitado varios correos. Espera unos minutos antes de volver a intentarlo.";

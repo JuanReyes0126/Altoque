@@ -1,12 +1,32 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { EmailVerificationPanel, resendButtonLabel, verificationErrorMessage } from "../../src/features/landing/EmailVerification";
+import { EmailVerificationPanel, resendButtonLabel, verificationCompletionError, verificationErrorMessage } from "../../src/features/landing/EmailVerification";
 import { ApiHttpError } from "../../src/lib/http";
 
 const props = { email: "fixture@example.invalid", sent: false, error: null, busy: false, cooldown: 0, accepted: false, onResend: () => {}, onContinue: () => {} };
 
 describe("Verificación · UI honesta", () => {
+  it("no confunde una cuenta inactiva con un token inválido ni afirma un envío/verificación exitosa", () => {
+    const message = verificationCompletionError(new ApiHttpError(403, "ACCOUNT_INACTIVE", "private fixture detail"));
+    expect(message).toContain("Esta cuenta no puede iniciar sesión");
+    expect(message).not.toMatch(/expiró|verificado|private fixture/);
+  });
+
+  it.each(["INVALID_TOKEN", "TOKEN_EXPIRED"])("sólo atribuye expiración/invalidez al código de token %s", (code) => {
+    expect(verificationCompletionError(new ApiHttpError(400, code, "private fixture detail"))).toContain("no es válido o expiró");
+  });
+
+  it.each([
+    new ApiHttpError(503, "EMAIL_DELIVERY_FAILED", "private fixture detail"),
+    new ApiHttpError(500, "INTERNAL_ERROR", "private fixture detail"),
+    new Error("private fixture detail"),
+  ])("fallos de servicio/red mantienen incertidumbre sin culpar al token", (error) => {
+    const message = verificationCompletionError(error);
+    expect(message).toContain("No pudimos completar la verificación");
+    expect(message).not.toMatch(/expiró|verificado|private fixture/);
+  });
+
   it("un envío fallido permite reenviar y no afirma envío exitoso", () => {
     const html = renderToStaticMarkup(createElement(EmailVerificationPanel, { ...props, error: "No pudimos enviar el correo de verificación." }));
     expect(html).toContain("Tu cuenta espera verificación");

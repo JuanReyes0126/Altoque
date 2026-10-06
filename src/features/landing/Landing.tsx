@@ -239,8 +239,10 @@ function AuthSheet({ auth, onClose }: { auth: AuthState; onClose: () => void }) 
     if (await resendState.resend(target)) { setPendingEmail(target); }
   };
 
+  const close = () => { if (!busy) onClose(); };
+
   return (
-    <Sheet open={!!auth} onClose={onClose} title={pendingEmail ? "Verifica tu correo" : mode === "signup" ? "Crea tu cuenta" : "Bienvenido de vuelta"}>
+    <Sheet open={!!auth} onClose={close} title={pendingEmail ? "Verifica tu correo" : mode === "signup" ? "Crea tu cuenta" : "Bienvenido de vuelta"}>
       {pendingEmail ? (
         <EmailVerificationPanel email={pendingEmail} sent={emailSent}
           error={error?.message ?? resendState.error} busy={resendState.busy}
@@ -252,7 +254,8 @@ function AuthSheet({ auth, onClose }: { auth: AuthState; onClose: () => void }) 
             {(["signup", "login"] as const).map((m) => (
               <button
                 key={m}
-                onClick={() => { setMode(m); setError(null); }}
+                onClick={() => { if (!busy) { setMode(m); setError(null); } }}
+                disabled={busy}
                 className={`h-10 rounded-full text-[0.82rem] font-extrabold transition-all ${mode === m ? "bg-ink text-white shadow-card" : "text-mut"}`}
               >
                 {m === "signup" ? "Registrarme" : "Iniciar sesión"}
@@ -262,16 +265,16 @@ function AuthSheet({ auth, onClose }: { auth: AuthState; onClose: () => void }) 
 
           <form onSubmit={submit} className="space-y-3">
             {mode === "signup" && (
-              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nombre completo" required className="w-full h-13 rounded-xl border border-line bg-paper px-4 font-semibold outline-none focus:border-pine transition-colors" />
+              <input value={name} onChange={(e) => { if (!busy) setName(e.target.value); }} placeholder="Nombre completo" aria-label="Nombre completo" autoComplete="name" disabled={busy} required className="w-full h-13 rounded-xl border border-line bg-paper px-4 font-semibold outline-none focus:border-pine transition-colors" />
             )}
-            <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="Correo electrónico" required className="w-full h-13 rounded-xl border border-line bg-paper px-4 font-semibold outline-none focus:border-pine transition-colors" />
+            <input value={email} onChange={(e) => { if (!busy) setEmail(e.target.value); }} type="email" placeholder="Correo electrónico" aria-label="Correo electrónico" autoComplete="email" disabled={busy} required className="w-full h-13 rounded-xl border border-line bg-paper px-4 font-semibold outline-none focus:border-pine transition-colors" />
             {mode === "signup" && (
-              <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Teléfono (opcional)" className="w-full h-13 rounded-xl border border-line bg-paper px-4 font-semibold outline-none focus:border-pine transition-colors" />
+              <input value={phone} onChange={(e) => { if (!busy) setPhone(e.target.value); }} type="tel" placeholder="Teléfono (opcional)" aria-label="Teléfono (opcional)" autoComplete="tel" disabled={busy} className="w-full h-13 rounded-xl border border-line bg-paper px-4 font-semibold outline-none focus:border-pine transition-colors" />
             )}
-            <input value={pass} onChange={(e) => setPass(e.target.value)} type="password" placeholder="Contraseña (mínimo 8 caracteres)" required minLength={8} className="w-full h-13 rounded-xl border border-line bg-paper px-4 font-semibold outline-none focus:border-pine transition-colors" />
+            <input value={pass} onChange={(e) => { if (!busy) setPass(e.target.value); }} type="password" placeholder="Contraseña (mínimo 8 caracteres)" aria-label="Contraseña" autoComplete={mode === "signup" ? "new-password" : "current-password"} disabled={busy} required minLength={8} className="w-full h-13 rounded-xl border border-line bg-paper px-4 font-semibold outline-none focus:border-pine transition-colors" />
 
             {error && (
-              <div className="rounded-xl bg-corsoft text-cor px-4 py-3 text-[0.8rem] font-bold flex items-start gap-2.5">
+              <div role="alert" className="rounded-xl bg-corsoft text-cor px-4 py-3 text-[0.8rem] font-bold flex items-start gap-2.5">
                 <Icon name="alert" className="w-4 h-4 shrink-0 mt-0.5" strokeWidth={2.2} />
                 <span>
                   {error.message}

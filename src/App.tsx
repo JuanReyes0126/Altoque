@@ -18,6 +18,7 @@ import { PATHS, RequireRole, roleHome, tabPath, viewToPath } from "./lib/router"
 import { Landing } from "./features/landing/Landing";
 import { ProviderOnboarding } from "./features/landing/Provider";
 import { PasswordRecovery } from "./features/landing/PasswordRecovery";
+import { verificationCompletionError } from "./features/landing/EmailVerification";
 import { ClientHome, ExploreView, ResultsView } from "./features/client/Home";
 import { ProProfile } from "./features/client/Profile";
 import { AddressesPage } from "./features/client/Addresses";
@@ -143,8 +144,8 @@ function useAuthBootstrap() {
           try {
             await authApi.verifyEmail(token);
             toast("Correo verificado — bienvenida 👋");
-          } catch {
-            toast("El enlace de verificación no es válido o expiró");
+          } catch (error) {
+            toast(verificationCompletionError(error));
           }
         }
         const session = await loadCurrentSession();
