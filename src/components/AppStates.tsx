@@ -15,7 +15,14 @@ export class AppErrorBoundary extends Component<{ children: ReactNode }, { faile
   state = { failed: false };
   static getDerivedStateFromError() { return { failed: true }; }
   render() {
-    if (this.state.failed) return <main className="max-w-md mx-auto px-5 py-16 text-center" role="alert"><h1 className="font-disp font-bold text-2xl">No pudimos mostrar esta página</h1><p className="text-mut mt-3">Vuelve al inicio e inténtalo nuevamente.</p><a href="/#/" className="btn-pine h-12 px-5 mt-6">Volver al inicio</a></main>;
+    if (this.state.failed) return <main className="max-w-md mx-auto px-5 py-16 text-center" role="alert"><h1 className="font-disp font-bold text-2xl">No pudimos mostrar esta página</h1><p className="text-mut mt-3">Vuelve al inicio e inténtalo nuevamente.</p><a href="/#/" onClick={(event) => {
+      // Cambiar sólo el hash no desmonta/reset el boundary que falló.
+      // Conservar abrir en otra pestaña; el click normal recarga el documento.
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+      event.preventDefault();
+      window.history.replaceState(null, "", "/#/");
+      window.location.reload();
+    }} className="btn-pine h-12 px-5 mt-6">Volver al inicio</a></main>;
     return this.props.children;
   }
 }
