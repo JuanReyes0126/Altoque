@@ -245,14 +245,17 @@ type DiagnosticRecord = {
 function captureDiagnostics() {
   const normal = vi.spyOn(console, "log").mockImplementation(() => {});
   const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+  const identityLabels = new Set(["preview", "production", "other", "invalid"]);
+  const isIdentity = (entry: unknown) => typeof entry === "string" && identityLabels.has(entry);
+  const identities = () => normal.mock.calls.filter(([entry]) => isIdentity(entry)).map(([entry]) => entry);
   const records = () =>
-    [...normal.mock.calls, ...errors.mock.calls].map(([entry]) => {
+    [...normal.mock.calls, ...errors.mock.calls].filter(([entry]) => !isIdentity(entry)).map(([entry]) => {
       expect(typeof entry).toBe("string");
       const record = JSON.parse(entry as string) as DiagnosticRecord;
       expect(record.event).toBe("edge_diag");
       return record;
     });
-  return { normal, errors, records };
+  return { normal, errors, records, identities };
 }
 
 function enableDiagnostics() {
@@ -265,6 +268,296 @@ function edgeFor(response: Response | (() => Response | Promise<Response>)) {
     fetch: typeof response === "function" ? response : () => response,
   });
 }
+
+describe("borde dual · identidad de DATABASE_URL sin conexión", () => {
+  const preview = "ep-flat-violet-au1e8xde";
+  const production = "ep-steep-hall-au81p0co";
+  const suffix = ".c-10.us-east-1.aws.neon.tech";
+  // Exclusivamente fixtures sintéticos; nunca cargar .env ni la app/Prisma real.
+  const user = "PRIVATE_DATABASE_USER_SENTINEL";
+  const password = "PRIVATE_DATABASE_PASSWORD_SENTINEL";
+  const database = "PRIVATE_DATABASE_NAME_SENTINEL";
+  const token = "PRIVATE_DATABASE_TOKEN_SENTINEL";
+  const fixtureUrl = (host: string) =>
+    `postgresql://${user}:${password}@${host}/${database}?sslmode=require&token=${token}`;
+
+  function prismaFixture() {
+    const client = {
+      $queryRaw: vi.fn(async (..._args: unknown[]) => []),
+      $connect: vi.fn(async () => {}),
+      $on: vi.fn((_event: string, _listener: (event: unknown) => void) => {}),
+    };
+    const constructor = vi.fn(function () { return client; });
+    return { client, constructor };
+  }
+
+  async function withPrismaFixture(run: (fixture: ReturnType<typeof prismaFixture>) => Promise<void>) {
+    const fixture = prismaFixture();
+    const cacheKey = "__altoquePrisma";
+    const savedCache = Object.getOwnPropertyDescriptor(globalThis, cacheKey);
+    Reflect.deleteProperty(globalThis, cacheKey);
+    vi.resetModules();
+    vi.doMock("@prisma/client", () => ({ PrismaClient: fixture.constructor }));
+    try {
+      // Importar el módulo real en frío, pero nunca el cliente/engine de PostgreSQL.
+      const { prisma } = await import("../database/prisma.js");
+      expect(prisma).toBe(fixture.client);
+      await run(fixture);
+    } finally {
+      if (savedCache) Object.defineProperty(globalThis, cacheKey, savedCache);
+      else Reflect.deleteProperty(globalThis, cacheKey);
+      vi.doUnmock("@prisma/client");
+      vi.resetModules();
+    }
+  }
+
+  it.each([
+    ["preview", fixtureUrl(`${preview}${suffix}`)],
+    ["production", fixtureUrl(`${production}-pooler${suffix}`)],
+    ["other", fixtureUrl("database.example")],
+    ["invalid", token],
+  ])("cold start y clasificación %s no conectan ni ejecutan SELECT 1", async (identity, value) => {
+    enableDiagnostics();
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("DATABASE_URL", value);
+    const logs = captureDiagnostics();
+    await withPrismaFixture(async ({ client, constructor }) => {
+      expect(constructor).toHaveBeenCalledOnce();
+      expect(client.$on.mock.calls.map(([event]) => event)).toEqual(["query", "warn", "error"]);
+      expect(client.$queryRaw).not.toHaveBeenCalled();
+      expect(client.$connect).not.toHaveBeenCalled();
+      expect(logs.normal).not.toHaveBeenCalled();
+      expect(logs.errors).not.toHaveBeenCalled();
+
+      const response = new Response("unchanged");
+      expect(await edgeFor(response)(new Request("https://preview.example/"))).toBe(response);
+      expect(logs.identities()).toEqual([identity]);
+      expect(client.$queryRaw).not.toHaveBeenCalled();
+      expect(client.$connect).not.toHaveBeenCalled();
+      expect(response.bodyUsed).toBe(false);
+      expect(logs.records().map((record) => record.stage)).toEqual([
+        "dispatch_web", "app_fetch_start", "app_fetch_done", "web_response_returned",
+      ]);
+      const output = JSON.stringify([...logs.normal.mock.calls, ...logs.errors.mock.calls]);
+      for (const privateValue of [user, password, database, token, preview, production, "neon.tech", value])
+        expect(output.indexOf(privateValue)).toBe(-1);
+    });
+  });
+
+  it.each([
+    ["preview", "0", "production", false],
+    ["development", "0", "development", false],
+    ["production", "1", "production", false],
+    ["preview", "1", "production", true],
+  ])("entorno=%s diag=%s conserva consultas normales", async (environment, diag, nodeEnv, enabled) => {
+    vi.stubEnv("VERCEL_ENV", environment);
+    vi.stubEnv("ALTOQUE_DIAG", diag);
+    vi.stubEnv("NODE_ENV", nodeEnv);
+    vi.stubEnv("DATABASE_URL", fixtureUrl(`${preview}${suffix}`));
+    const logs = captureDiagnostics();
+    await withPrismaFixture(async ({ client }) => {
+      expect(client.$queryRaw).not.toHaveBeenCalled();
+      expect(client.$connect).not.toHaveBeenCalled();
+      expect(client.$on).toHaveBeenCalledTimes(enabled ? 3 : 0);
+      const fetch = async () => {
+        await client.$queryRaw`SELECT normal_request_fixture`;
+        return new Response("normal query result", { status: 201 });
+      };
+      const response = await createEdgeHandler({ fetch })(new Request("https://preview.example/"));
+      expect(await response.text()).toBe("normal query result");
+      expect(response.status).toBe(201);
+      expect(client.$queryRaw).toHaveBeenCalledOnce();
+      expect(client.$queryRaw.mock.calls[0][0]).toEqual(["SELECT normal_request_fixture"]);
+      expect(logs.identities()).toEqual(enabled ? ["preview"] : []);
+      if (!enabled) expect(logs.normal).not.toHaveBeenCalled();
+      expect(logs.errors).not.toHaveBeenCalled();
+    });
+  });
+
+  it("desarrollo con DIAG conserva el self-test local", async () => {
+    vi.stubEnv("VERCEL_ENV", "development");
+    vi.stubEnv("ALTOQUE_DIAG", "1");
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("DATABASE_URL", fixtureUrl("127.0.0.1:1"));
+    const logs = captureDiagnostics();
+    await withPrismaFixture(async ({ client }) => {
+      expect(client.$queryRaw).toHaveBeenCalledOnce();
+      expect(client.$queryRaw.mock.calls[0][0]).toEqual(["SELECT 1"]);
+      expect(client.$connect).not.toHaveBeenCalled();
+      expect(client.$on.mock.calls.map(([event]) => event)).toEqual(["query", "warn", "error"]);
+      expect(logs.identities()).toEqual([]);
+      expect(logs.errors).not.toHaveBeenCalled();
+      const entries = logs.normal.mock.calls.map(([line]) => JSON.parse(line as string));
+      expect(entries).toEqual([expect.objectContaining({ msg: "[diag][prisma:selftest] SELECT 1 ok" })]);
+    });
+  });
+
+  it("Preview conserva observación Prisma sin registrar SQL, parámetros ni mensajes", async () => {
+    enableDiagnostics();
+    vi.stubEnv("NODE_ENV", "production");
+    const value = fixtureUrl(`${preview}${suffix}`);
+    vi.stubEnv("DATABASE_URL", value);
+    const logs = captureDiagnostics();
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await withPrismaFixture(async ({ client }) => {
+      for (const [event, listener] of client.$on.mock.calls) {
+        listener({ duration: 7, query: value, params: password, message: token });
+        expect(["query", "warn", "error"].indexOf(event)).not.toBe(-1);
+      }
+      expect(client.$queryRaw).not.toHaveBeenCalled();
+      expect(client.$connect).not.toHaveBeenCalled();
+      expect(JSON.parse(logs.normal.mock.calls[0][0] as string)).toMatchObject({
+        msg: "[diag][prisma:query]", durationMs: 7,
+      });
+      const output = JSON.stringify([...logs.normal.mock.calls, ...warnings.mock.calls, ...logs.errors.mock.calls]);
+      for (const privateValue of [value, user, password, database, token, preview, production, "neon.tech"])
+        expect(output.indexOf(privateValue)).toBe(-1);
+    });
+  });
+
+  it.each([
+    ["Preview directo", fixtureUrl(`${preview}${suffix}`), "preview"],
+    ["Preview pooled", fixtureUrl(`${preview}-pooler${suffix}`), "preview"],
+    ["Production directo", fixtureUrl(`${production}${suffix}`), "production"],
+    ["Production pooled", fixtureUrl(`${production}-pooler${suffix}`), "production"],
+    ["alias postgres", fixtureUrl(`${preview}${suffix}`).replace("postgresql:", "postgres:"), "preview"],
+    ["DNS con mayúsculas", fixtureUrl(`${preview}${suffix}`.toUpperCase()), "preview"],
+    ["credenciales codificadas", fixtureUrl(`${preview}${suffix}`).replace(password, "PRIVATE%40%3A%23%2F"), "preview"],
+    ["otro endpoint Neon", fixtureUrl(`ep-unknown-fixture${suffix}`), "other"],
+    ["PostgreSQL local", fixtureUrl("127.0.0.1:5432"), "other"],
+    ["PostgreSQL IPv6", fixtureUrl("[::1]:5432"), "other"],
+    ["otro dominio", fixtureUrl("database.example"), "other"],
+    ["dominio con sufijo falso", fixtureUrl(`${preview}${suffix}.evil.example`), "other"],
+    ["prefijo del endpoint", fixtureUrl(`prefix-${preview}${suffix}`), "other"],
+    ["sufijo del endpoint", fixtureUrl(`${preview}-suffix${suffix}`), "other"],
+    ["pooler duplicado", fixtureUrl(`${preview}-pooler-pooler${suffix}`), "other"],
+    ["host conocido en credenciales", `postgresql://${preview}:${production}@database.example/${database}`, "other"],
+    ["host conocido en path", fixtureUrl("database.example").replace(database, preview), "other"],
+    ["host conocido en query inerte", `${fixtureUrl("database.example")}&reference=${preview}&other=${production}`, "other"],
+    ["host diferente en query no cambia la autoridad", `${fixtureUrl(`${preview}${suffix}`)}&fixture=${production}`, "preview"],
+    ["override host", `${fixtureUrl(`${preview}${suffix}`)}&host=${production}`, "invalid"],
+    ["override host codificado", `${fixtureUrl(`${preview}${suffix}`)}&h%6fst=${production}`, "invalid"],
+    ["override host vacío", `${fixtureUrl(`${preview}${suffix}`)}&host=`, "invalid"],
+    ["override host duplicado", `${fixtureUrl(`${preview}${suffix}`)}&host=fixture&host=${production}`, "invalid"],
+    ["override hostaddr", `${fixtureUrl(`${preview}${suffix}`)}&HOSTADDR=127.0.0.1`, "invalid"],
+    ["override puerto", `${fixtureUrl(`${preview}${suffix}`)}&port=5433`, "invalid"],
+    ["override servicio", `${fixtureUrl(`${preview}${suffix}`)}&service=fixture`, "invalid"],
+    ["override archivo servicio", `${fixtureUrl(`${preview}${suffix}`)}&servicefile=fixture`, "invalid"],
+    ["override options", `${fixtureUrl(`${preview}${suffix}`)}&options=endpoint%3D${production}`, "invalid"],
+    ["override endpoint", `${fixtureUrl(`${preview}${suffix}`)}&endpoint=${production}`, "invalid"],
+    ["puerto malformado", fixtureUrl(`${preview}${suffix}:not-a-port`), "invalid"],
+    ["esquema HTTPS", fixtureUrl(`${preview}${suffix}`).replace("postgresql:", "https:"), "invalid"],
+    ["esquema vacío", fixtureUrl(`${preview}${suffix}`).replace("postgresql:", ""), "invalid"],
+    ["hostname ausente", "postgresql:///fixture", "invalid"],
+    ["hostname codificado", fixtureUrl(`${preview}%2Ec-10.us-east-1.aws.neon.tech`), "invalid"],
+    ["hostname Unicode", fixtureUrl(`é${preview}${suffix}`), "invalid"],
+    ["hostname con salto de línea", fixtureUrl(`${preview}\n${suffix}`), "invalid"],
+    ["hostname con espacio", fixtureUrl(`${preview} ${suffix}`), "invalid"],
+    ["backslash en autoridad", fixtureUrl(`${preview}\\${suffix}`), "invalid"],
+    ["fragmento", `${fixtureUrl(`${preview}${suffix}`)}#${token}`, "invalid"],
+    ["fragmento vacío", `${fixtureUrl(`${preview}${suffix}`)}#`, "invalid"],
+    ["texto no URL", token, "invalid"],
+    ["vacío", "", "invalid"],
+    ["ausente", undefined, "invalid"],
+  ])("clasifica %s; sólo emite la etiqueta permitida", async (_name, value, expected) => {
+    enableDiagnostics();
+    vi.stubEnv("DATABASE_URL", value);
+    const logs = captureDiagnostics();
+    const response = new Response("untouched", { status: 202, headers: { "x-fixture": "unchanged" } });
+    const returned = await edgeFor(response)(new Request("https://preview.example/"));
+
+    expect(logs.identities()).toEqual([expected]);
+    expect(returned).toBe(response);
+    expect(response.status).toBe(202);
+    expect(response.headers.get("x-fixture")).toBe("unchanged");
+    expect(response.bodyUsed).toBe(false);
+    expect(logs.errors).not.toHaveBeenCalled();
+    // Todos los argumentos son una etiqueta o el payload cerrado preexistente.
+    for (const call of [...logs.normal.mock.calls, ...logs.errors.mock.calls]) expect(call).toHaveLength(1);
+    expect(logs.records().map((record) => record.stage)).toEqual([
+      "dispatch_web", "app_fetch_start", "app_fetch_done", "web_response_returned",
+    ]);
+    const output = JSON.stringify([...logs.normal.mock.calls, ...logs.errors.mock.calls]);
+    for (const privateValue of [user, password, database, token, preview, production, "neon.tech", "postgresql://", "postgres://"])
+      expect(output.indexOf(privateValue)).toBe(-1);
+    if (value) expect(output.indexOf(value)).toBe(-1);
+    expect(await response.text()).toBe("untouched");
+  });
+
+  it.each([
+    ["preview", "1", true],
+    ["preview", "0", false],
+    ["preview", "true", false],
+    ["preview", "01", false],
+    ["preview", "1 ", false],
+    ["preview", "", false],
+    ["preview", undefined, false],
+    ["Preview", "1", false],
+    ["production", "1", false],
+    ["development", "1", false],
+    [undefined, "1", false],
+  ])("gate exacto entorno=%s diag=%s", async (environment, diag, enabled) => {
+    vi.stubEnv("VERCEL_ENV", environment);
+    vi.stubEnv("ALTOQUE_DIAG", diag);
+    vi.stubEnv("DATABASE_URL", fixtureUrl(`${preview}${suffix}`));
+    const logs = captureDiagnostics();
+    const res = mockResponse();
+    await edgeFor(new Response("unchanged"))(mockIncoming({}), res);
+    expect(logs.identities()).toEqual(enabled ? ["preview"] : []);
+    expect(bodyOf(res)).toBe("unchanged");
+    expect(res.statusCode).toBe(200);
+    expect(res.writableEnded).toBe(true);
+    res.emit("close");
+    const response = new Response("native unchanged", { status: 201 });
+    expect(await edgeFor(response)(new Request("https://preview.example/"))).toBe(response);
+    expect(logs.identities()).toEqual(enabled ? ["preview", "preview"] : []);
+    if (!enabled) {
+      expect(logs.normal).not.toHaveBeenCalled();
+      expect(logs.errors).not.toHaveBeenCalled();
+    }
+  });
+
+  it("Node preserva bytes, headers y cookies sin exponer identidad al cliente", async () => {
+    enableDiagnostics();
+    vi.stubEnv("DATABASE_URL", fixtureUrl(`${production}-pooler${suffix}`));
+    const logs = captureDiagnostics();
+    const res = mockResponse();
+    const bytes = Uint8Array.from([0, 127, 128, 255]);
+    const returned = await edgeFor(new Response(bytes, {
+      status: 201,
+      headers: [["x-fixture", "unchanged"], ["set-cookie", "fixture=unchanged; HttpOnly"]],
+    }))(mockIncoming({}), res);
+
+    expect(logs.identities()).toEqual(["production"]);
+    expect(returned).toBeUndefined();
+    expect(res.statusCode).toBe(201);
+    expect(res.headers).toEqual({ "x-fixture": "unchanged", "set-cookie": ["fixture=unchanged; HttpOnly"] });
+    expect(Buffer.concat(res.bodyChunks)).toEqual(Buffer.from(bytes));
+    expect(res.writableEnded).toBe(true);
+    res.emit("close");
+    const output = JSON.stringify([...logs.normal.mock.calls, ...logs.errors.mock.calls]);
+    for (const privateValue of [user, password, database, token, preview, production, "neon.tech"])
+      expect(output.indexOf(privateValue)).toBe(-1);
+    expect(logs.records().some((record) => record.stage === "response_close")).toBe(true);
+  });
+
+  it("fallo del log de identidad no cambia Response ni el diagnóstico existente", async () => {
+    enableDiagnostics();
+    vi.stubEnv("DATABASE_URL", fixtureUrl(`${preview}${suffix}`));
+    const logs = captureDiagnostics();
+    logs.normal.mockImplementationOnce(() => { throw new Error("PRIVATE_LOGGER_FAILURE_SENTINEL"); });
+    const response = new Response("unchanged");
+    const returned = await edgeFor(response)(new Request("https://preview.example/"));
+    expect(returned).toBe(response);
+    expect(logs.normal.mock.calls[0]).toEqual(["preview"]);
+    expect(logs.errors).not.toHaveBeenCalled();
+    expect(logs.records().map((record) => record.stage)).toEqual([
+      "dispatch_web", "app_fetch_start", "app_fetch_done", "web_response_returned",
+    ]);
+    expect(JSON.stringify(logs.normal.mock.calls).indexOf("PRIVATE_LOGGER_FAILURE_SENTINEL")).toBe(-1);
+    expect(await response.text()).toBe("unchanged");
+  });
+});
 
 describe("borde dual · diagnóstico de Preview", () => {
   it.each([

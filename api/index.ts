@@ -37,6 +37,48 @@ const isServerResponse = (x: unknown): x is ServerResponse =>
   typeof (x as ServerResponse).writeHead === "function" &&
   typeof (x as ServerResponse).end === "function";
 
+type DatabaseIdentity = "preview" | "production" | "other" | "invalid";
+
+/** Identidad configurada, sin conexión: referencias verificadas en Neon. */
+function databaseIdentity(value: string | undefined): DatabaseIdentity {
+  if (!value || /[\s\u0000-\u001f\u007f\\#]/u.test(value)) return "invalid";
+  try {
+    const url = new URL(value);
+    if ((url.protocol !== "postgres:" && url.protocol !== "postgresql:")
+      || !url.hostname || url.hash) return "invalid";
+    // No inferir el destino por autoridad si hay overrides de conexión/routing.
+    for (const key of url.searchParams.keys()) {
+      if (/^(?:host|hostaddr|port|service|servicefile|options|endpoint)$/i.test(key)) return "invalid";
+    }
+
+    const host = url.hostname.toLowerCase();
+    // El parser de protocolos no especiales puede aceptar hosts codificados.
+    // Validar autoridad sin decodificarla ni reflejarla en el diagnóstico.
+    const dnsHost = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+    if (!dnsHost.test(host) && !/^\[[0-9a-f:.]+\]$/.test(host)) return "invalid";
+
+    const suffix = ".c-10.us-east-1.aws.neon.tech";
+    const endpoints = {
+      preview: "ep-flat-violet-au1e8xde",
+      production: "ep-steep-hall-au81p0co",
+    } as const;
+    for (const identity of ["preview", "production"] as const) {
+      const endpoint = endpoints[identity];
+      if (host === `${endpoint}${suffix}` || host === `${endpoint}-pooler${suffix}`) return identity;
+    }
+    return "other";
+  } catch { return "invalid"; }
+}
+
+function recordDatabaseIdentity(): void {
+  // Ni siquiera leer DATABASE_URL fuera del gate exacto autorizado.
+  if (process.env.VERCEL_ENV !== "preview" || process.env.ALTOQUE_DIAG !== "1") return;
+  try {
+    // Payload único y cerrado: no objeto, hostname, URL ni error del parser.
+    console.log(databaseIdentity(process.env.DATABASE_URL));
+  } catch { /* Un fallo del logger no cambia el comportamiento del adaptador. */ }
+}
+
 // TEMPORAL: diagnóstico del borde, exclusivamente Preview + ALTOQUE_DIAG=1.
 // Payload cerrado: nunca imprimir mensajes, stacks completos, URLs ni headers.
 type DiagnosticStage =
@@ -284,6 +326,7 @@ export function createEdgeHandler(application: FetchApp, opts: EdgeOptions = {})
     reqOrIncoming: Request | IncomingMessage,
     maybeRes?: ServerResponse,
   ): Promise<Response | void> => {
+    recordDatabaseIdentity();
     // Convención Web nativa: Request -> Response (sin adaptador).
     if (!maybeRes || !isServerResponse(maybeRes)) {
       const diagnostic = edgeDiagnostic(reqOrIncoming);

@@ -50,7 +50,7 @@ function buildClient(): PrismaClient {
     client.$on("warn", () => log.warn("[diag][prisma:warn]", { errorType: "PrismaWarning" }));
     client.$on("error", () => log.error("[diag][prisma:error]", { errorType: "PrismaEngineError" }));
 
-    // ⚠️ TEMPORAL (debug F1.8): SELF-TEST — ejecuta SELECT 1 al arrancar el
+    // ⚠️ TEMPORAL (debug F1.8): SELF-TEST local — ejecuta SELECT 1 al arrancar el
     // módulo y registra el resultado. Responde directamente la pregunta
     // "¿los eventos [prisma:query] disparan en este runtime/versión?":
     //  - si aparece "[diag][prisma:selftest] SELECT 1 ok" Y su
@@ -60,16 +60,20 @@ function buildClient(): PrismaClient {
     //  - si el self-test falla, el problema es de conexión/engine en frío.
     // No bloquea el cold start (fire-and-forget) y un fallo se registra sin
     // romper el módulo.
-    const t0 = Date.now();
-    client
-      .$queryRaw`SELECT 1`
-      .then(() => log.info("[diag][prisma:selftest] SELECT 1 ok", { durationMs: Date.now() - t0 }))
-      .catch((e: unknown) =>
-        log.error("[diag][prisma:selftest] failed", {
-          durationMs: Date.now() - t0,
-          errorType: e instanceof Error ? e.name : "UnknownError",
-        }),
-      );
+    // Preview + DIAG debe clasificar la configuración sin abrir conexiones.
+    // Mantener sólo observación; las consultas normales no se interceptan.
+    if (process.env.VERCEL_ENV !== "preview") {
+      const t0 = Date.now();
+      client
+        .$queryRaw`SELECT 1`
+        .then(() => log.info("[diag][prisma:selftest] SELECT 1 ok", { durationMs: Date.now() - t0 }))
+        .catch((e: unknown) =>
+          log.error("[diag][prisma:selftest] failed", {
+            durationMs: Date.now() - t0,
+            errorType: e instanceof Error ? e.name : "UnknownError",
+          }),
+        );
+    }
   }
 
   return client;
