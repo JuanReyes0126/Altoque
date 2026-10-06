@@ -9,8 +9,10 @@ import { useEffect, useState, type ReactNode } from "react";
 import { HashRouter, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { Icon } from "./components/icons";
 import { ToastProvider } from "./components/Toast";
+import { AppErrorBoundary, AuthLoadError, NotFoundPage } from "./components/AppStates";
 import { setSession, toast, useApp, type Tab, type View } from "./lib/state";
 import { authApi } from "./lib/api";
+import { loadCurrentSession } from "./lib/session-actions";
 import { PATHS, RequireRole, roleHome, tabPath, viewToPath } from "./lib/router";
 
 import { Landing } from "./features/landing/Landing";
@@ -58,12 +60,12 @@ function ClientShell() {
   else if (loc.pathname === `${PATHS.app}/solicitudes`) { activeTab = "jobs"; view = <RequestsTab go={go} />; }
   else if (loc.pathname === `${PATHS.app}/favoritos`) { activeTab = "favs"; view = <FavoritesTab go={go} />; }
   else if (loc.pathname === `${PATHS.app}/perfil`) { activeTab = "me"; view = <MeTab go={go} jump={jump} />; }
-  else if (seg[1] === "servicios" && seg[2]) view = <ResultsView key={seg[2]} catId={seg[2]} go={go} />;
-  else if (seg[1] === "profesional" && seg[2]) view = <ProProfile key={seg[2]} id={seg[2]} go={go} />;
+  else if (seg.length === 3 && seg[1] === "servicios" && seg[2]) view = <ResultsView key={seg[2]} catId={seg[2]} go={go} />;
+  else if (seg.length === 3 && seg[1] === "profesional" && seg[2]) view = <ProProfile key={seg[2]} id={seg[2]} go={go} />;
   else if (loc.pathname === `${PATHS.app}/solicitar`)
     view = <RequestWizard key={loc.search} catId={sp.get("cat") ?? undefined} proId={sp.get("pro") ?? undefined} go={go} />;
-  else if (seg[1] === "solicitud" && seg[2]) view = <TrackingView key={seg[2]} jobId={seg[2]} go={go} jump={jump} />;
-  else view = <Navigate to={PATHS.app} replace />;
+  else if (seg.length === 3 && seg[1] === "solicitud" && seg[2]) view = <TrackingView key={seg[2]} jobId={seg[2]} go={go} jump={jump} />;
+  else view = <NotFoundPage />;
 
   return (
     <div className="min-h-dvh">
@@ -119,38 +121,39 @@ function Toast() {
  *  También consume el enlace de verificación (?token=…) cuando llega por correo. */
 function useAuthBootstrap() {
   const [ready, setReady] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [version, setVersion] = useState(0);
   useEffect(() => {
     let alive = true;
+    setReady(false); setFailed(false);
     (async () => {
       try {
         const params = new URLSearchParams(window.location.search);
         const token = params.get("token");
-        if (token) {
+        if (token && params.get("flow") !== "password-reset") {
+          // Retirar datos sensibles del URL antes de la petición de verificación.
+          params.delete("token");
+          const qs = params.toString();
+          window.history.replaceState({}, "", `${window.location.pathname}${qs ? "?" + qs : ""}${window.location.hash}`);
           try {
             await authApi.verifyEmail(token);
             toast("Correo verificado — bienvenida 👋");
           } catch {
             toast("El enlace de verificación no es válido o expiró");
           }
-          params.delete("token");
-          const qs = params.toString();
-          window.history.replaceState({}, "", `${window.location.pathname}${qs ? "?" + qs : ""}${window.location.hash}`);
         }
-        const session = await authApi.getSession();
+        const session = await loadCurrentSession();
         if (!alive) return;
-        if (session) {
-          // /me es la fuente de verdad del perfil privado; si falla, la sesión vale igual.
-          try { setSession(await authApi.me()); } catch { setSession(session); }
-        }
+        setSession(session);
       } catch {
-        /* sin backend o sin cookie → estado público, sin sesión */
+        if (alive) setFailed(true);
       } finally {
         if (alive) setReady(true);
       }
     })();
     return () => { alive = false; };
-  }, []);
-  return ready;
+  }, [version]);
+  return { ready, failed, retry: () => setVersion((value) => value + 1) };
 }
 
 function AuthSplash() {
@@ -167,12 +170,14 @@ function AuthSplash() {
 }
 
 export default function App() {
-  const ready = useAuthBootstrap();
-  if (!ready) return <AuthSplash />;
+  const bootstrap = useAuthBootstrap();
+  if (!bootstrap.ready) return <AuthSplash />;
+  if (bootstrap.failed) return <AuthLoadError onRetry={bootstrap.retry} />;
 
   return (
     <div className="p-root min-h-dvh">
       <ToastProvider>
+        <AppErrorBoundary>
         <HashRouter>
           <Routes>
             {/* público */}
@@ -180,7 +185,7 @@ export default function App() {
             <Route path="/proveedores" element={<ProviderOnboarding />} />
 
             {/* cliente */}
-            <Route path="/app/*" element={<RequireRole roles={["customer"]}><ClientShell /></RequireRole>} />
+            <Route path="/app/*" element={<RequireRole roles={["customer", "provider", "admin"]}><ClientShell /></RequireRole>} />
 
             {/* proveedor — el modo pro es una capacidad de UI para cualquier cuenta
                 autenticada (modelo de doble capacidad); los PERMISOS reales los
@@ -190,10 +195,11 @@ export default function App() {
             {/* admin (F4) */}
             <Route path="/admin" element={<RequireRole roles={["admin"]}><AdminHome /></RequireRole>} />
 
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </HashRouter>
       <Toast />
+        </AppErrorBoundary>
       </ToastProvider>
     </div>
   );

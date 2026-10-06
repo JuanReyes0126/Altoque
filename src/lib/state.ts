@@ -293,9 +293,9 @@ export const INCOMING_POOL: Omit<Incoming, "id" | "expiresIn">[] = [
  *   concede privilegios — la autoridad es el backend (RBAC + ownership).
  */
 let state: State = {
-  role: "customer", zoneId: "cerros", favorites: ["p1", "p3", "p5"], jobs: [], inbox: [],
-  proActive: null, proAvailable: true, toastMsg: null, toastId: 0,
-  proStats: { today: 4, earnings: 6350, week: [4200, 5800, 3900, 7200, 6350, 0, 0], acceptRate: 96 },
+  role: "customer", zoneId: "cerros", favorites: [], jobs: [], inbox: [],
+  proActive: null, proAvailable: false, toastMsg: null, toastId: 0,
+  proStats: { today: 0, earnings: 0, week: [], acceptRate: 0 },
   session: null,
 };
 
@@ -318,10 +318,12 @@ export const setProAvailable = (v: boolean) => {
 
 /* ── sesión real (F1.8): solo el servidor la otorga; aquí se representa ── */
 export function setSession(session: Session | null) {
-  set({ session, role: session ? state.role : "customer" });
+  if (session?.id !== state.session?.id) {
+    set({ session, role: "customer", favorites: [], jobs: [], inbox: [], proActive: null, proAvailable: false });
+  } else set({ session, role: session ? state.role : "customer" });
 }
 export function clearSession() {
-  set({ session: null, role: "customer" });
+  set({ session: null, role: "customer", favorites: [], jobs: [], inbox: [], proActive: null, proAvailable: false });
 }
 
 let pendingIntent: View | null = null;
