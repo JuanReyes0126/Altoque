@@ -10,6 +10,7 @@
  */
 import { Hono } from "hono";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../database/prisma.js";
 import { requireAuth, requireVerifiedEmail, type AuthEnv } from "../middleware/auth.js";
 import { ok, page, pageMeta, parsePaging } from "../lib/envelope.js";
@@ -111,7 +112,19 @@ providerRoutes.post("/me", requireAuth, requireVerifiedEmail, async (c) => {
     });
 
     return newProvider;
-  }));
+  })).catch((error: unknown) => {
+    // El precheck mejora UX, pero el unique sigue siendo la autoridad ante dos altas simultáneas.
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const model = error.meta?.modelName;
+      const target = error.meta?.target;
+      if ((model === undefined || model === "provider_profile") &&
+        (target === "provider_profile_user_id_key" || (model === "provider_profile" &&
+          (target === "user_id" || (Array.isArray(target) && target.length === 1 && target[0] === "user_id"))))) {
+        throw AppError.conflict("Ya tienes un perfil de proveedor");
+      }
+    }
+    throw error;
+  });
 
   return c.json(ok(provider), 201);
 });
@@ -207,6 +220,7 @@ providerRoutes.get("/inbox", requireAuth, requireVerifiedEmail, async (c) => {
 
   const where = {
     status: "searching" as const,
+    customer_id: { not: user.id },
     category_id: { in: categoryIds },
     zone_id: { in: zoneIds },
   };
