@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { StaticRouter } from "react-router-dom/server";
+import { StaticRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { Landing, LandingCatalog, LandingProviders, landingSearchIntent } from "../../src/features/landing/Landing";
 import type { CatalogCategory, PublicProvider } from "../../src/lib/api";
