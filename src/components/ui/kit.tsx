@@ -3,7 +3,7 @@
    Piezas visuales compartidas por landing, cliente, proveedor y
    (F4) admin. El estilo vive en los tokens de src/index.css.
    ════════════════════════════════════════════════════════════════ */
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../icons";
 import { catById, faceUrl, jobUrl, quadPos, type Pro } from "../../lib/state";
 
@@ -255,17 +255,45 @@ export function SkelList({ n = 4 }: { n?: number }) {
 
 /* ── bottom sheet ── */
 export function Sheet({ open, onClose, title, children }: { open: boolean; onClose: () => void; title?: string; children: ReactNode }) {
+  const titleId = useId();
+  const dialog = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    if (!open || typeof document === "undefined") return;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    dialog.current?.focus();
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); close.current(); return; }
+      if (event.key !== "Tab" || !dialog.current) return;
+      const controls = Array.from(dialog.current.querySelectorAll<HTMLElement>("button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex='0']"))
+        .filter((node) => node.getClientRects().length > 0 && !node.closest("fieldset:disabled"));
+      const first = controls[0], last = controls.at(-1);
+      if (!first) { event.preventDefault(); dialog.current.focus(); }
+      else if (!controls.includes(document.activeElement as HTMLElement)) { event.preventDefault(); (event.shiftKey ? last : first)?.focus(); }
+      else if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", keydown);
+    return () => {
+      document.removeEventListener("keydown", keydown);
+      document.body.style.overflow = overflow;
+      if (previous?.isConnected) previous.focus();
+    };
+  }, [open]);
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-[70]">
-      <button className="absolute inset-0 bg-ink/45 backdrop-blur-[2px] animate-fadein" onClick={onClose} aria-label="Cerrar" />
+      <button tabIndex={-1} className="absolute inset-0 bg-ink/45 backdrop-blur-[2px] animate-fadein" onClick={onClose} aria-label="Cerrar" />
       <div className="absolute inset-x-0 bottom-0 animate-slideup">
-        <div className="mx-auto max-w-md bg-card rounded-t-[26px] border-t border-x border-line2 shadow-lift max-h-[82vh] overflow-y-auto no-scrollbar">
+        <div ref={dialog} role="dialog" aria-modal="true" aria-labelledby={title ? titleId : undefined} aria-label={title ? undefined : "Opciones"} tabIndex={-1} className="mx-auto max-w-md bg-card rounded-t-[26px] sm:rounded-[26px] sm:mb-8 border border-line2 shadow-lift max-h-[min(82dvh,48rem)] overflow-y-auto pb-[env(safe-area-inset-bottom)]">
           <div className="sticky top-0 bg-card pt-3 pb-2 px-5 border-b border-line2">
             <span className="mx-auto block w-10 h-1 rounded-full bg-line mb-3" />
             <div className="flex items-center justify-between">
-              {title && <h3 className="font-disp font-bold text-lg text-ink">{title}</h3>}
-              <button onClick={onClose} className="ml-auto w-8 h-8 grid place-items-center rounded-full bg-tint text-mut" aria-label="Cerrar">
+              {title && <h3 id={titleId} className="font-disp font-bold text-lg text-ink">{title}</h3>}
+              <button onClick={onClose} className="ml-auto w-11 h-11 grid place-items-center rounded-full bg-tint text-mut" aria-label="Cerrar">
                 <Icon name="x" className="w-4 h-4" strokeWidth={2.4} />
               </button>
             </div>
@@ -285,9 +313,9 @@ export function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boo
       aria-checked={on}
       aria-label={label ?? "Disponibilidad"}
       onClick={() => onChange(!on)}
-      className={`relative w-[4.4rem] h-10 rounded-full transition-colors duration-300 shrink-0 ${on ? "bg-ok" : "bg-line"}`}
+      className={`relative w-20 h-11 rounded-full transition-colors duration-200 shrink-0 ${on ? "bg-ok" : "bg-line"}`}
     >
-      <span className={`absolute top-1 w-8 h-8 rounded-full bg-card shadow-md transition-transform duration-300 ease-out ${on ? "translate-x-[2.4rem]" : "translate-x-1"}`}>
+      <span className={`absolute left-1 top-1 w-9 h-9 rounded-full bg-card shadow-md transition-transform duration-200 ease-out ${on ? "translate-x-9" : "translate-x-0"}`}>
         <span className={`w-full h-full grid place-items-center ${on ? "text-ok" : "text-soft"}`}>
           <Icon name={on ? "check" : "x"} className="w-3.5 h-3.5" strokeWidth={3} />
         </span>
