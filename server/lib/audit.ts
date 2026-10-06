@@ -43,12 +43,17 @@ export interface AuditInput {
 
 const FORBIDDEN_METADATA_KEYS = ["password", "token", "secret", "otp", "cookie", "blob_key"];
 
-function sanitize(meta?: Record<string, unknown>): Record<string, unknown> | undefined {
+export function sanitizeAuditMetadata(meta?: Record<string, unknown>): Record<string, unknown> | undefined {
   if (!meta) return undefined;
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(meta)) {
-    if (FORBIDDEN_METADATA_KEYS.includes(k.toLowerCase())) continue;
-    out[k] = v;
+    if (FORBIDDEN_METADATA_KEYS.some((key) => k.toLowerCase().replace(/[_-]/g, "").includes(key.replace(/[_-]/g, "")))) continue;
+    const cleanValue = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(cleanValue);
+      if (value && typeof value === "object") return sanitizeAuditMetadata(value as Record<string, unknown>);
+      return value;
+    };
+    out[k] = cleanValue(v);
   }
   return out;
 }
@@ -69,7 +74,7 @@ export async function audit(db: PrismaClient | Tx, actor: AuditActor, input: Aud
       action: input.action,
       entity_type: input.entityType ?? null,
       entity_id: input.entityId ?? null,
-      metadata: (sanitize(input.metadata) as any) ?? Prisma.JsonNull,
+      metadata: (sanitizeAuditMetadata(input.metadata) as any) ?? Prisma.JsonNull,
       ip: input.ip ?? null,
       user_agent: input.userAgent ?? null,
     },

@@ -16,7 +16,7 @@ import type { AuthEnv } from "./middleware/auth.js";
 import { accessLog, originCheck, requestId, securityHeaders } from "./middleware/security.js";
 import { AppError } from "./lib/errors.js";
 import { err } from "./lib/envelope.js";
-import { log } from "./lib/logger.js";
+import { log, redactLogPath } from "./lib/logger.js";
 import { diagEnabled } from "./lib/diag.js";
 import { healthRoutes } from "./routes/health.js";
 import { categoryRoutes } from "./routes/categories.js";
@@ -49,7 +49,7 @@ app.on(["GET", "POST"], "/api/v1/auth/*", async (c) => {
     log.info("[diag] auth.handler → start", {
       requestId: rid,
       method: c.req.method,
-      path: c.req.path,
+      path: redactLogPath(c.req.path),
     });
   }
   // ⚠️ TEMPORAL (debug F1.8): diagnóstico PASIVO del Request que llega a
@@ -90,7 +90,7 @@ app.on(["GET", "POST"], "/api/v1/auth/*", async (c) => {
     if (diagEnabled()) {
       log.error("[diag] auth.handler → threw", {
         requestId: rid,
-        message: err instanceof Error ? err.message : String(err),
+        errorType: err instanceof Error ? err.name : "UnknownError",
       });
     }
     throw err;
@@ -127,8 +127,8 @@ app.onError((error, c) => {
   }
   log.error("unhandled_error", {
     requestId: c.get("requestId"),
-    path: c.req.path,
-    message: error.message,
+    path: redactLogPath(c.req.path),
+    errorType: error.name,
   });
   return c.json(err("INTERNAL_ERROR", "Error interno del servidor"), 500);
 });

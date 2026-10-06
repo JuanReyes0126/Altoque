@@ -23,18 +23,35 @@ export interface LogEntry {
 const REDACT_KEYS = new Set([
   "password", "token", "cookie", "authorization", "secret", "otp",
   "accesstoken", "refreshtoken", "idtoken", "sessiontoken", "apikey",
+  "databaseurl", "directdatabaseurl", "resendapikey", "blobreadwritetoken", "blobprivatereadwritetoken",
+  "betterauthsecret", "testdatabaseurl",
 ]);
+
+/** Better Auth incluye el token de reset como segmento de ruta. */
+export function redactLogPath(path: string): string {
+  return path
+    .replace(/(\/api\/v1\/auth\/reset-password\/)[^/?#\s]+/gi, "$1[REDACTED]")
+    .replace(/([?&](?:token|password|secret|api[_-]?key)=)[^&#\s]+/gi, "$1[REDACTED]");
+}
+
+function redactValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactValue);
+  if (value instanceof Error) return { name: value.name };
+  if (value && typeof value === "object") return redact(value as Record<string, unknown>);
+  if (typeof value === "string") {
+    return redactLogPath(value)
+      .replace(/postgres(?:ql)?:\/\/[^\s"'<>]+/gi, "[CONNECTION_URL_REDACTED]")
+      .replace(/([?&](?:token|password|secret|api[_-]?key)=)[^&#\s]+/gi, "$1[REDACTED]");
+  }
+  return value;
+}
 
 export function redact(obj: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(obj)) {
-    if (REDACT_KEYS.has(k.toLowerCase())) {
+    if (REDACT_KEYS.has(k.toLowerCase().replace(/[_-]/g, ""))) {
       out[k] = "[REDACTED]";
-    } else if (v && typeof v === "object" && !Array.isArray(v)) {
-      out[k] = redact(v as Record<string, unknown>);
-    } else {
-      out[k] = v;
-    }
+    } else out[k] = redactValue(v);
   }
   return out;
 }

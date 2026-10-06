@@ -14,6 +14,7 @@
  */
 import { PrismaClient } from "@prisma/client";
 import { log } from "../lib/logger.js";
+import { diagEnabled } from "../lib/diag.js";
 
 const globalForPrisma = globalThis as unknown as {
   __altoquePrisma?: PrismaClient;
@@ -21,10 +22,9 @@ const globalForPrisma = globalThis as unknown as {
 
 function buildClient(): PrismaClient {
   // ⚠️ TEMPORAL (debug F1.8): con ALTOQUE_DIAG=1 se registra cada operación
-  // Prisma (SQL con placeholders + duración) para localizar la query de
-  // signup que no termina. NUNCA se registra `e.params` (contiene email,
-  // hash de contraseña y demás valores sensibles).
-  const diag = process.env.ALTOQUE_DIAG === "1";
+  // Prisma (duración, sin SQL ni parámetros) para localizar la query de
+  // signup que no termina. El diagnóstico también está bloqueado en Production.
+  const diag = diagEnabled();
 
   const client = new PrismaClient({
     // `omit` no existe en el client estándar de v6: los campos sensibles
@@ -45,12 +45,10 @@ function buildClient(): PrismaClient {
     client.$on("query", (e) => {
       log.info("[diag][prisma:query]", {
         durationMs: e.duration,
-        // SQL con placeholders ($1,$2…) — seguro. Truncado por precaución.
-        sql: e.query.slice(0, 280),
       });
     });
-    client.$on("warn", (e) => log.warn("[diag][prisma:warn]", { message: e.message }));
-    client.$on("error", (e) => log.error("[diag][prisma:error]", { message: e.message }));
+    client.$on("warn", () => log.warn("[diag][prisma:warn]", { errorType: "PrismaWarning" }));
+    client.$on("error", () => log.error("[diag][prisma:error]", { errorType: "PrismaEngineError" }));
 
     // ⚠️ TEMPORAL (debug F1.8): SELF-TEST — ejecuta SELECT 1 al arrancar el
     // módulo y registra el resultado. Responde directamente la pregunta
@@ -69,7 +67,7 @@ function buildClient(): PrismaClient {
       .catch((e: unknown) =>
         log.error("[diag][prisma:selftest] failed", {
           durationMs: Date.now() - t0,
-          message: e instanceof Error ? e.message : String(e),
+          errorType: e instanceof Error ? e.name : "UnknownError",
         }),
       );
   }

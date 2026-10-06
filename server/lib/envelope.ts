@@ -32,7 +32,12 @@ export function parsePaging(q: URLSearchParams | Record<string, string>, default
     }
     return q[key] ?? null;
   };
-  const page = Math.max(1, Number(get("page") ?? "1") || 1);
-  const limit = Math.min(maxLimit, Math.max(1, Number(get("limit") ?? String(defaultLimit)) || defaultLimit));
+  const integer = (value: string | null, fallback: number, max: number) => {
+    const parsed = value === null || value.trim() === "" ? fallback : Number(value);
+    return Number.isFinite(parsed) ? Math.min(max, Math.max(1, Math.floor(parsed))) : fallback;
+  };
+  const limit = integer(get("limit"), defaultLimit, maxLimit);
+  // Prisma y PostgreSQL requieren enteros; el offset también debe ser seguro.
+  const page = integer(get("page"), 1, Math.floor(2_147_483_647 / limit) + 1);
   return { page, limit, skip: (page - 1) * limit };
 }

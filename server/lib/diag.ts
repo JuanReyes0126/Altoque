@@ -12,7 +12,9 @@
  */
 import { log } from "./logger.js";
 
-const enabled = () => process.env.ALTOQUE_DIAG === "1";
+const enabled = () => process.env.ALTOQUE_DIAG === "1"
+  && process.env.VERCEL_ENV !== "production"
+  && (process.env.NODE_ENV !== "production" || process.env.VERCEL_ENV === "preview");
 
 /** "maria@ejemplo.com" → "m…@ejemplo.com" (correlación sin exponer). */
 export function redactEmail(email: string | undefined | null): string {
@@ -33,7 +35,7 @@ export async function withDiag<T>(label: string, fn: () => Promise<T>): Promise<
   } catch (e) {
     log.error(`[diag] ${label} → threw`, {
       durationMs: Date.now() - t0,
-      message: e instanceof Error ? e.message : String(e),
+      errorType: e instanceof Error ? e.name : "UnknownError",
     });
     throw e;
   }
@@ -85,7 +87,7 @@ export function withDiagAdapter<TFactory extends (options: never) => Record<stri
           stage(`[diag][ba:adapter] ${op} → error`, {
             model,
             durationMs: Date.now() - t0,
-            message: e instanceof Error ? e.message : String(e),
+            errorType: e instanceof Error ? e.name : "UnknownError",
           });
           throw e;
         }

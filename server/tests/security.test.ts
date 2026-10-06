@@ -81,3 +81,15 @@ describe("Errores · formato consistente", () => {
     expect(body.error?.message).toBeTruthy();
   });
 });
+
+describe("Cache del API · respuestas privadas y errores", () => {
+  it.each([
+    ["/api/v1/auth/get-session", 200],
+    ["/api/v1/me", 401],
+    ["/api/v1/no-existe", 404],
+  ] as const)("GET %s siempre devuelve no-store", async (path, status) => {
+    const response = await app.request(path);
+    expect(response.status).toBe(status);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+  });
+});
