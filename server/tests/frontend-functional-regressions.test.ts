@@ -289,6 +289,74 @@ describe("inbox profesional: páginas, estados y dirección privada del trabajo"
   });
 });
 
+describe.each([
+  ["cliente", DisputeView], ["profesional", ProDisputeView],
+] as const)("disputas %s: polling con efectos reales", (_label, View) => {
+  it("actualiza Abierta a Resuelta sin refrescar ni mutar la API", async () => {
+    vi.useFakeTimers();
+    calls.disputes.mockResolvedValueOnce(responseWithDispute("open"))
+      .mockResolvedValueOnce(responseWithDispute("resolved_customer"));
+    const onExists = vi.fn();
+    const renderer = await mount(createElement(View, { requestId: "request-fixture", onDisputeExists: onExists }));
+    expect(screenText(renderer)).toContain("Abierta");
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+    expect(screenText(renderer)).toContain("Resuelta a favor del cliente");
+    expect(screenText(renderer)).toContain("Resolución de prueba completada");
+    expect(onExists).toHaveBeenLastCalledWith(true);
+    expect(calls.disputes).toHaveBeenLastCalledWith({ requestId: "request-fixture", limit: 1 });
+    await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
+    expect(calls.disputes).toHaveBeenCalledTimes(2);
+  });
+
+  it("fallo de polling bloquea otra apertura y permite reintentar", async () => {
+    vi.useFakeTimers();
+    calls.disputes.mockResolvedValueOnce({ data: [] }).mockRejectedValueOnce(new Error("fixture failure"))
+      .mockResolvedValueOnce({ data: [] });
+    const onExists = vi.fn();
+    const renderer = await mount(createElement(View, { requestId: "request-fixture", onDisputeExists: onExists }));
+    expect(onExists).toHaveBeenLastCalledWith(false);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+    expect(screenText(renderer)).toContain("No se pudo cargar la información de la disputa");
+    expect(onExists).toHaveBeenLastCalledWith(true);
+    await click(renderer, "Reintentar");
+    expect(onExists).toHaveBeenLastCalledWith(false);
+  });
+
+  it("cancelación descarta resultados antiguos y detiene consultas al desmontar", async () => {
+    vi.useFakeTimers();
+    const old = deferred<ReturnType<typeof responseWithDispute>>();
+    calls.disputes.mockReturnValueOnce(old.promise).mockResolvedValueOnce(responseWithDispute("resolved_customer"));
+    const onExists = vi.fn();
+    const renderer = await mount(createElement(View, { requestId: "old-request", onDisputeExists: onExists }));
+    await act(async () => {
+      renderer.update(createElement(View, { requestId: "current-request", onDisputeExists: onExists }));
+    });
+    await act(async () => { old.resolve(responseWithDispute("open")); });
+    expect(screenText(renderer)).toContain("Resolución de prueba completada");
+    expect(renderer.root.findAllByType("span").map((node) => text(node.children))).not.toContain("Abierta");
+    const count = calls.disputes.mock.calls.length;
+    await act(async () => { renderer.unmount(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
+    expect(calls.disputes).toHaveBeenCalledTimes(count);
+  });
+
+  it("contrato inválido no permite una segunda apertura", async () => {
+    calls.disputes.mockResolvedValue({ data: [{ id: "fixture", status: "unknown" }] });
+    const onExists = vi.fn();
+    const renderer = await mount(createElement(View, { requestId: "request-fixture", onDisputeExists: onExists }));
+    expect(screenText(renderer)).toContain("No se pudo cargar la información de la disputa");
+    expect(onExists).toHaveBeenLastCalledWith(true);
+  });
+
+  it("no programa polling para una disputa inicialmente resuelta", async () => {
+    vi.useFakeTimers();
+    calls.disputes.mockResolvedValue(responseWithDispute("resolved_customer"));
+    await mount(createElement(View, { requestId: "request-fixture" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
+    expect(calls.disputes).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("AuthSheet: petición pendiente y accesibilidad sin cambiar el diseño", () => {
   it("registro pendiente impide cerrar, cambiar modo o editar sus credenciales", async () => {
     const pending = deferred<unknown>();
