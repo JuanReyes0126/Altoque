@@ -43,18 +43,22 @@ export async function http<T>(path: string, opts: RequestOptions = {}): Promise<
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   let res: Response;
+  let text = "";
+  const multipart = typeof FormData !== "undefined" && opts.body instanceof FormData;
   try {
     res = await fetch(`${API_BASE}${path}`, {
       method: opts.method ?? (opts.body !== undefined ? "POST" : "GET"),
       credentials: "include",
-      headers: opts.body !== undefined ? { "Content-Type": "application/json" } : undefined,
-      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+      // El navegador añade el boundary de multipart; no convertir fotos en {}.
+      headers: opts.body !== undefined && !multipart ? { "Content-Type": "application/json" } : undefined,
+      body: multipart ? opts.body as FormData : opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
       signal: controller.signal,
     });
+    if (!opts.noContent) text = await res.text();
   } catch (e) {
     // Timeout: el servidor aceptó la conexión pero no respondió a tiempo.
     // Distinto de NETWORK_ERROR (no hubo conexión / backend caído).
-    if (e instanceof DOMException && e.name === "AbortError") {
+    if (controller.signal.aborted || (e instanceof DOMException && e.name === "AbortError")) {
       throw new ApiHttpError(0, "REQUEST_TIMEOUT", "Altoque tardó demasiado en responder. Inténtalo nuevamente.");
     }
     // fallo de red / backend caído
@@ -69,12 +73,17 @@ export async function http<T>(path: string, opts: RequestOptions = {}): Promise<
   }
 
   // Mejor Auth devuelve 204/JSON vacío en algunas operaciones.
-  const text = await res.text();
-  const body = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+  let body: unknown;
+  try { body = text ? JSON.parse(text) : {}; }
+  catch {
+    throw new ApiHttpError(res.status, "INVALID_RESPONSE", "No pudimos interpretar la respuesta de Altoque. Inténtalo nuevamente.");
+  }
 
   if (!res.ok) {
     // Better Auth: { code, message } · Altoque: { error: { code, message } }
-    const inner = (body.error ?? body) as { code?: unknown; message?: unknown };
+    const object = body !== null && typeof body === "object" ? body as Record<string, unknown> : {};
+    const error = object.error ?? object;
+    const inner = error !== null && typeof error === "object" ? error as { code?: unknown; message?: unknown } : {};
     const code = typeof inner.code === "string" ? inner.code : "ERROR";
     const message = typeof inner.message === "string" && inner.message ? inner.message : "Ocurrió un error inesperado.";
     throw new ApiHttpError(res.status, code, message);
