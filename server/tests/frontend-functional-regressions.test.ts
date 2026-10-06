@@ -185,6 +185,110 @@ describe("directorio cliente: navegación y contratos reales de React", () => {
   });
 });
 
+describe("inbox profesional: páginas, estados y dirección privada del trabajo", () => {
+  it("navega páginas de 20 sin cargar todo el dataset", async () => {
+    const renderer = await mount(provider());
+    expect(screenText(renderer)).toContain("request-20");
+    expect(screenText(renderer)).not.toContain("request-21");
+    expect(button(renderer, "Anterior").props.disabled).toBe(true);
+    await click(renderer, "Siguiente");
+    expect(screenText(renderer)).toContain("request-21");
+    expect(screenText(renderer)).not.toContain("request-20");
+    expect(button(renderer, "Siguiente").props.disabled).toBe(true);
+    await click(renderer, "Anterior");
+    expect(calls.inbox.mock.calls.map(([params]) => params)).toEqual([
+      { page: 1, limit: 20 }, { page: 2, limit: 20 }, { page: 1, limit: 20 },
+    ]);
+  });
+
+  it("mantiene límites desactivados durante la carga de otra página", async () => {
+    const next = deferred<ReturnType<typeof inboxPage>>();
+    calls.inbox.mockResolvedValueOnce(inboxPage(1, 21)).mockReturnValueOnce(next.promise);
+    const renderer = await mount(provider());
+    await click(renderer, "Siguiente");
+    expect(screenText(renderer)).toContain("Cargando solicitudes");
+    expect(button(renderer, "Anterior").props.disabled).toBe(true);
+    expect(button(renderer, "Siguiente").props.disabled).toBe(true);
+    await act(async () => { next.resolve(inboxPage(2, 21)); });
+    expect(screenText(renderer)).toContain("request-21");
+  });
+
+  it("polling corrige una página desaparecida sin confundirla con inbox vacío", async () => {
+    vi.useFakeTimers();
+    calls.inbox.mockResolvedValueOnce(inboxPage(1, 21)).mockResolvedValueOnce(inboxPage(2, 21))
+      .mockResolvedValueOnce(inboxPage(2, 20)).mockResolvedValueOnce(inboxPage(1, 20));
+    const renderer = await mount(provider());
+    await click(renderer, "Siguiente");
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+    expect(calls.inbox.mock.calls.map(([params]) => params.page)).toEqual([1, 2, 2, 1]);
+    expect(screenText(renderer)).toContain("request-20");
+    expect(screenText(renderer)).not.toContain("No hay solicitudes disponibles");
+  });
+
+  it("error real conserva reintento y vuelve a la página actual", async () => {
+    calls.inbox.mockResolvedValueOnce(inboxPage(1, 21)).mockRejectedValueOnce(new Error("fixture failure"))
+      .mockResolvedValueOnce(inboxPage(2, 21));
+    const renderer = await mount(provider());
+    await click(renderer, "Siguiente");
+    expect(screenText(renderer)).toContain("No pudimos cargar las solicitudes");
+    expect(screenText(renderer)).not.toContain("request-1");
+    await click(renderer, "Reintentar");
+    expect(screenText(renderer)).toContain("request-21");
+    expect(calls.inbox).toHaveBeenLastCalledWith({ page: 2, limit: 20 });
+  });
+
+  it("cero solicitudes conserva el estado Online y sus controles", async () => {
+    calls.inbox.mockResolvedValue(inboxPage(1, 0));
+    const renderer = await mount(provider());
+    expect(screenText(renderer)).toContain("No hay solicitudes disponibles por ahora");
+    expect(screenText(renderer)).not.toContain("No pudimos cargar las solicitudes");
+    const toggle = renderer.root.findByProps({ role: "switch" });
+    expect(toggle.props["aria-checked"]).toBe(true);
+    expect(toggle.props.disabled).toBe(false);
+    await act(async () => { toggle.props.onClick(); });
+    expect(calls.availability).toHaveBeenCalledWith(false);
+    expect(renderer.root.findByProps({ role: "switch" }).props["aria-checked"]).toBe(false);
+  });
+
+  it("no consulta prematuramente ni publica una respuesta anterior al pasar Offline", async () => {
+    const profile = deferred<Record<string, unknown>>();
+    calls.profile.mockReturnValueOnce(profile.promise);
+    const renderer = await mount(provider());
+    expect(calls.inbox).not.toHaveBeenCalled();
+    const stale = deferred<ReturnType<typeof inboxPage>>();
+    calls.inbox.mockReturnValueOnce(stale.promise);
+    await act(async () => {
+      profile.resolve({ id: "provider-fixture", verification_status: "verified", is_available: true, user: { name: "Profesional de prueba" } });
+    });
+    await act(async () => { renderer.root.findByProps({ role: "switch" }).props.onClick(); });
+    await act(async () => { stale.resolve(inboxPage(1, 21)); });
+    expect(screenText(renderer)).toContain("Estás fuera de línea");
+    expect(screenText(renderer)).not.toContain("request-1");
+  });
+
+  it("metadata incompleta produce error recuperable, no falso vacío", async () => {
+    calls.inbox.mockResolvedValueOnce({ data: [], meta: { page: 1, total: 0, pages: 1 } })
+      .mockResolvedValueOnce(inboxPage(1, 0));
+    const renderer = await mount(provider());
+    expect(screenText(renderer)).toContain("No pudimos cargar las solicitudes");
+    await click(renderer, "Reintentar");
+    expect(screenText(renderer)).toContain("No hay solicitudes disponibles por ahora");
+  });
+
+  it.each(["Calle de prueba, número 123\nReferencia de prueba", null])("muestra dirección existente o límite honesto: %s", async (line) => {
+    calls.active.mockResolvedValue({ data: { job: {
+      id: "active-fixture", status: "accepted", eta_min: 15, category, zone: { name: "Zona de prueba" },
+      description: "Servicio en curso de prueba", customer: { name: "Cliente de prueba", email: "not-rendered@example.invalid" },
+      address: line ? { line } : null,
+    } } });
+    const renderer = await mount(provider());
+    expect(screenText(renderer)).toContain("Dirección del servicio");
+    expect(screenText(renderer)).toContain(line || "El cliente todavía no proporcionó una dirección exacta");
+    expect(screenText(renderer)).not.toContain("not-rendered@example.invalid");
+    expect(button(renderer, "Ir hacia el cliente")).toBeDefined();
+  });
+});
+
 describe("AuthSheet: petición pendiente y accesibilidad sin cambiar el diseño", () => {
   it("registro pendiente impide cerrar, cambiar modo o editar sus credenciales", async () => {
     const pending = deferred<unknown>();

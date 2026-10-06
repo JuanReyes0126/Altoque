@@ -18,6 +18,8 @@ import { ProviderProfileSetup } from "./ProviderProfileSetup";
 
 type ProTab = "home" | "activity" | "me";
 const ETAS = [10, 15, 20, 30, 45, 60];
+const INBOX_PAGE_LIMIT = 20;
+interface InboxPageMeta { page: number; limit: number; total: number; pages: number }
 const loadErrorMessage = (error: unknown, fallback: string) => error instanceof ApiHttpError ? error.message : fallback;
 
 export function ProApp() {
@@ -35,6 +37,8 @@ export function ProApp() {
   const [inboxStatus, setInboxStatus] = useState<ProviderLoadStatus>("idle");
   const [inboxError, setInboxError] = useState<string | null>(null);
   const [inboxReload, setInboxReload] = useState(0);
+  const [inboxPage, setInboxPage] = useState(1);
+  const [inboxMeta, setInboxMeta] = useState<InboxPageMeta | null>(null);
   const [activeJobStatus, setActiveJobStatus] = useState<ProviderLoadStatus>("idle");
   const [activeJobError, setActiveJobError] = useState<string | null>(null);
   const [activeJobReload, setActiveJobReload] = useState(0);
@@ -75,14 +79,32 @@ export function ProApp() {
     setInbox([]);
     setInboxError(null);
     setInboxStatus("idle");
-    if (!providerId || !verified || !available) return;
+    if (!providerId || !verified || !available) {
+      setInboxPage(1);
+      setInboxMeta(null);
+      return;
+    }
     setInboxStatus("loading");
     const loadInbox = async () => {
       if (pending) return;
       pending = true;
       try {
-        const res = await api.providers.getInbox();
+        const res = await api.providers.getInbox({ page: inboxPage, limit: INBOX_PAGE_LIMIT });
         if (mounted) {
+          const meta = res?.meta as InboxPageMeta | undefined;
+          if (!Array.isArray(res?.data) || !meta ||
+            ![meta.page, meta.limit, meta.total, meta.pages].every(Number.isSafeInteger) ||
+            meta.page !== inboxPage || meta.limit !== INBOX_PAGE_LIMIT || meta.total < 0 ||
+            meta.pages !== Math.max(1, Math.ceil(meta.total / INBOX_PAGE_LIMIT)) ||
+            res.data.length > Math.max(0, Math.min(INBOX_PAGE_LIMIT, meta.total - (inboxPage - 1) * INBOX_PAGE_LIMIT))) {
+            throw new Error("INVALID_PROVIDER_INBOX_PAGE");
+          }
+          setInboxMeta(meta);
+          if (inboxPage > meta.pages) {
+            setInboxPage(meta.pages);
+            setInboxStatus("loading");
+            return;
+          }
           setInbox(res.data);
           setInboxError(null);
           setInboxStatus("success");
@@ -100,7 +122,7 @@ export function ProApp() {
     void loadInbox();
     const interval = setInterval(loadInbox, 10000);
     return () => { mounted = false; clearInterval(interval); };
-  }, [providerId, verified, available, inboxReload]);
+  }, [providerId, verified, available, inboxPage, inboxReload]);
 
   // No confundir un error al comprobar el trabajo activo con una respuesta job:null.
   useEffect(() => {
@@ -277,7 +299,7 @@ export function ProApp() {
                 <section className="mt-7">
                   <div className="flex items-center justify-between mb-3.5">
                     <h3 className="font-disp font-bold text-[1.05rem]">Solicitudes cerca de ti</h3>
-                    {inboxStatus === "success" && <span className="text-[0.7rem] font-extrabold text-namber bg-[#332a14] rounded-full px-2.5 py-1">{inbox.length} nuevas</span>}
+                    {inboxStatus === "success" && <span className="text-[0.7rem] font-extrabold text-namber bg-[#332a14] rounded-full px-2.5 py-1">{inboxMeta?.total ?? inbox.length} solicitudes</span>}
                   </div>
 
                   <ProviderInboxState
@@ -298,6 +320,13 @@ export function ProApp() {
                         />
                       ))}
                   </ProviderInboxState>
+                  {verified && available && (inboxPage > 1 || (inboxMeta?.pages ?? 1) > 1) && (
+                    <nav aria-label="Páginas de solicitudes disponibles" aria-busy={inboxStatus === "loading"} className="flex flex-wrap items-center gap-3 mt-4">
+                      <button type="button" disabled={jobBusy || inboxStatus === "loading" || inboxPage <= 1} onClick={() => setInboxPage((page) => page - 1)} className="btn-ghost-dark h-11 px-4">Anterior</button>
+                      <span className="text-sm text-nmut">{inboxStatus === "loading" || inboxStatus === "error" ? `Página ${inboxPage}` : `${inboxPage} / ${inboxMeta?.pages ?? 1}`}</span>
+                      <button type="button" disabled={jobBusy || inboxStatus === "loading" || !inboxMeta || inboxPage >= inboxMeta.pages} onClick={() => setInboxPage((page) => page + 1)} className="btn-ghost-dark h-11 px-4">Siguiente</button>
+                    </nav>
+                  )}
                 </section>
               </>
             )}
@@ -444,6 +473,11 @@ function ActiveJob({ job, onAdvance, busy }: { job: any; onAdvance: () => void; 
           </div>
 
           <p className="text-[0.82rem] text-nmut font-medium leading-relaxed mt-3.5 bg-nsurf rounded-xl px-4 py-3">"{job.description}"</p>
+
+          <div className="mt-4">
+            <p className="text-[0.72rem] font-bold text-nmut">Dirección del servicio</p>
+            <p className="text-[0.82rem] text-ntxt mt-1 whitespace-pre-wrap break-words">{job.address?.line || "El cliente todavía no proporcionó una dirección exacta. La zona indicada no sustituye la dirección del servicio."}</p>
+          </div>
 
           {/* mini timeline */}
           <div className="flex items-center gap-1.5 mt-4">
