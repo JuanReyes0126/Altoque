@@ -21,7 +21,7 @@ jobs:
     env:
       ALTOQUE_SAFE_VALIDATION: "1"
       # Prisma/dotenv and Vite must not read project or shared environment files.
-      DOTENV_CONFIG_PATH: ${{ runner.temp }}/altoque-ci-no-env
+      DOTENV_CONFIG_PATH: /tmp/altoque-ci-no-env-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
