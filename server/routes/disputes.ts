@@ -14,6 +14,7 @@ import { prisma } from "../database/prisma.js";
 import { requireAuth, requireVerifiedEmail, requirePermission, type AuthEnv } from "../middleware/auth.js";
 import { ok, page, pageMeta, parsePaging } from "../lib/envelope.js";
 import { AppError } from "../lib/errors.js";
+import { readJsonBody } from "../lib/json.js";
 import { ulid } from "../lib/ids.js";
 import { audit } from "../lib/audit.js";
 import { hasAdminPermission } from "../lib/permissions.js";
@@ -61,7 +62,7 @@ disputeRoutes.get("/admin/all", requireAuth, requireVerifiedEmail, requirePermis
 // Crear disputa (cliente o proveedor de una solicitud)
 disputeRoutes.post("/", requireAuth, requireVerifiedEmail, async (c) => {
   const { user } = c.get("auth");
-  const body = await c.req.json();
+  const body = await readJsonBody(c.req);
 
   const schema = z.object({
     request_id: z.string().min(1).max(100),
@@ -269,7 +270,7 @@ disputeRoutes.get("/:id", requireAuth, requireVerifiedEmail, async (c) => {
 disputeRoutes.post("/:id/resolve", requireAuth, requireVerifiedEmail, requirePermission("disputes.resolve"), async (c) => {
   const { user: admin } = c.get("auth");
   const disputeId = c.req.param("id");
-  const body = await c.req.json();
+  const body = await readJsonBody(c.req);
 
   const schema = z.object({
     status: z.enum(["resolved_customer", "resolved_provider"]),

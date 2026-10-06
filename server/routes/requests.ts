@@ -12,6 +12,7 @@ import { prisma } from "../database/prisma.js";
 import { requireAuth, requireVerifiedEmail, type AuthEnv } from "../middleware/auth.js";
 import { ok, page, pageMeta, parsePaging } from "../lib/envelope.js";
 import { AppError } from "../lib/errors.js";
+import { readJsonBody } from "../lib/json.js";
 import { ulid, nextRequestCode } from "../lib/ids.js";
 import { consume, LIMITS } from "../lib/ratelimit.js";
 import { transitionRequest } from "../requests/transitions.js";
@@ -22,7 +23,7 @@ export const requestRoutes = new Hono<AuthEnv>();
 // Crear nueva solicitud
 requestRoutes.post("/", requireAuth, requireVerifiedEmail, async (c) => {
   const { user } = c.get("auth");
-  const body = await c.req.json();
+  const body = await readJsonBody(c.req);
 
   // Validación de entrada
   const schema = z.object({
@@ -307,7 +308,7 @@ requestRoutes.post("/:id/confirm", requireAuth, requireVerifiedEmail, async (c) 
 requestRoutes.post("/:id/review", requireAuth, requireVerifiedEmail, async (c) => {
   const { user } = c.get("auth");
   const id = c.req.param("id");
-  const body = await c.req.json();
+  const body = await readJsonBody(c.req);
 
   const schema = z.object({
     rating: z.number().int().min(1).max(5),

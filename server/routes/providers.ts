@@ -14,6 +14,7 @@ import { prisma } from "../database/prisma.js";
 import { requireAuth, requireVerifiedEmail, type AuthEnv } from "../middleware/auth.js";
 import { ok, page, pageMeta, parsePaging } from "../lib/envelope.js";
 import { AppError } from "../lib/errors.js";
+import { readJsonBody } from "../lib/json.js";
 import { ulid } from "../lib/ids.js";
 import { createWithReferralCode } from "../lib/referrals.js";
 import { consume, LIMITS } from "../lib/ratelimit.js";
@@ -50,7 +51,7 @@ providerRoutes.get("/me", requireAuth, requireVerifiedEmail, async (c) => {
 // Crear perfil de proveedor (si no existe)
 providerRoutes.post("/me", requireAuth, requireVerifiedEmail, async (c) => {
   const { user } = c.get("auth");
-  const body = await c.req.json();
+  const body = await readJsonBody(c.req);
 
   const schema = z.object({
     business_name: z.string().max(100).optional(),
@@ -119,7 +120,7 @@ providerRoutes.post("/me", requireAuth, requireVerifiedEmail, async (c) => {
 // Actualizar perfil del proveedor
 providerRoutes.patch("/me", requireAuth, requireVerifiedEmail, async (c) => {
   const { user } = c.get("auth");
-  const body = await c.req.json();
+  const body = await readJsonBody(c.req);
 
   const schema = z.object({
     business_name: z.string().max(100).optional(),
@@ -143,7 +144,7 @@ providerRoutes.patch("/me", requireAuth, requireVerifiedEmail, async (c) => {
 // Cambiar disponibilidad del proveedor
 providerRoutes.patch("/availability", requireAuth, requireVerifiedEmail, async (c) => {
   const { user } = c.get("auth");
-  const body = await c.req.json();
+  const body = await readJsonBody(c.req);
 
   const schema = z.object({
     is_available: z.boolean(),
@@ -238,7 +239,7 @@ providerRoutes.get("/inbox", requireAuth, requireVerifiedEmail, async (c) => {
 providerRoutes.post("/requests/:id/claim", requireAuth, requireVerifiedEmail, async (c) => {
   const { user } = c.get("auth");
   const requestId = c.req.param("id");
-  const body = await c.req.json();
+  const body = await readJsonBody(c.req);
 
   const schema = z.object({
     eta_min: z.number().int().min(5).max(120),
@@ -264,7 +265,7 @@ providerRoutes.post("/requests/:id/claim", requireAuth, requireVerifiedEmail, as
 providerRoutes.post("/requests/:id/status", requireAuth, requireVerifiedEmail, async (c) => {
   const { user } = c.get("auth");
   const requestId = c.req.param("id");
-  const body = await c.req.json();
+  const body = await readJsonBody(c.req);
 
   const schema = z.object({
     status: z.enum(["on_the_way", "arrived", "in_progress", "completed"]),

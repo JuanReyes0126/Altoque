@@ -16,6 +16,7 @@ import { prisma } from "../database/prisma.js";
 import { requireAuth, requireVerifiedEmail, requirePermission, type AuthEnv } from "../middleware/auth.js";
 import { ok, page, pageMeta, parsePaging } from "../lib/envelope.js";
 import { AppError } from "../lib/errors.js";
+import { readJsonBody } from "../lib/json.js";
 import { ulid } from "../lib/ids.js";
 import { audit } from "../lib/audit.js";
 
@@ -106,7 +107,7 @@ adminRoutes.get("/users", requireAuth, requireVerifiedEmail, requirePermission("
 adminRoutes.post("/users/:id/suspend", requireAuth, requireVerifiedEmail, requirePermission("users.suspend"), async (c) => {
   const { user: admin } = c.get("auth");
   const userId = c.req.param("id");
-  const body = await c.req.json().catch(() => { throw AppError.validation(); });
+  const body = await readJsonBody(c.req);
 
   const schema = z.object({
     reason: z.string().max(500).optional(),
@@ -134,7 +135,7 @@ adminRoutes.post("/users/:id/suspend", requireAuth, requireVerifiedEmail, requir
 adminRoutes.post("/users/:id/block", requireAuth, requireVerifiedEmail, requirePermission("users.block"), async (c) => {
   const { user: admin } = c.get("auth");
   const userId = c.req.param("id");
-  const body = await c.req.json().catch(() => { throw AppError.validation(); });
+  const body = await readJsonBody(c.req);
 
   const schema = z.object({
     reason: z.string().max(500).optional(),
@@ -223,7 +224,7 @@ adminRoutes.post("/providers/:id/approve", requireAuth, requireVerifiedEmail, re
 adminRoutes.post("/providers/:id/reject", requireAuth, requireVerifiedEmail, requirePermission("providers.verify"), async (c) => {
   const { user: admin } = c.get("auth");
   const providerId = c.req.param("id");
-  const body = await c.req.json().catch(() => { throw AppError.validation(); });
+  const body = await readJsonBody(c.req);
 
   const schema = z.object({
     reason: z.string().trim().min(1).max(500),

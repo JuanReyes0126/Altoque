@@ -4,6 +4,7 @@ import { z } from "zod";
 import { prisma } from "../database/prisma.js";
 import { ok } from "../lib/envelope.js";
 import { AppError } from "../lib/errors.js";
+import { readJsonBody } from "../lib/json.js";
 import { ulid } from "../lib/ids.js";
 import { requireAuth, requireVerifiedEmail, type AuthEnv } from "../middleware/auth.js";
 
@@ -57,7 +58,7 @@ addressRoutes.get("/:id", async (c) => {
 
 addressRoutes.post("/", async (c) => {
   const { user } = c.get("auth");
-  const input = await c.req.json().catch(() => { throw AppError.validation(); });
+  const input = await readJsonBody(c.req);
   const data = addressInput.parse(input);
   await activeZone(data.zone_id);
   const address = await prisma.address.create({
@@ -69,7 +70,7 @@ addressRoutes.post("/", async (c) => {
 
 addressRoutes.patch("/:id", async (c) => {
   const { user } = c.get("auth");
-  const input = await c.req.json().catch(() => { throw AppError.validation(); });
+  const input = await readJsonBody(c.req);
   const data = addressPatch.parse(input);
   if (data.zone_id !== undefined) await activeZone(data.zone_id);
   const address = await prisma.$transaction(async (tx) => {
