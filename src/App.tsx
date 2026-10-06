@@ -1,11 +1,9 @@
 /* ════════════════════════════════════════════════════════════════
    ALTOQUE · Composición raíz
-   Enrutamiento (F0): HashRouter — garantiza que cualquier ruta
-   funcione al refrescar en CUALQUIER hosting estático. En Vercel
-   (F5) se cambia a BrowserRouter (los rewrites ya existen en
-   vercel.json); es un cambio de una línea aquí.
+   HashRouter conserva los enlaces y las rutas profundas de la SPA.
+   Las vistas profesionales/administrativas se cargan cuando se usan.
    ════════════════════════════════════════════════════════════════ */
-import { useEffect, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { HashRouter, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { Icon } from "./components/icons";
 import { ToastProvider } from "./components/Toast";
@@ -24,8 +22,9 @@ import { ProProfile } from "./features/client/Profile";
 import { AddressesPage } from "./features/client/Addresses";
 import { SecurityPage } from "./features/client/Security";
 import { FavoritesTab, MeTab, RequestWizard, RequestsTab, TrackingView } from "./features/client/Flow";
-import { ProApp } from "./features/provider/ProApp";
-import { AdminHome } from "./features/admin/AdminHome";
+// A nivel de módulo: evita crear nuevas promesas lazy durante un render.
+const ProApp = lazy(() => import("./features/provider/ProApp").then((module) => ({ default: module.ProApp })));
+const AdminHome = lazy(() => import("./features/admin/AdminHome").then((module) => ({ default: module.AdminHome })));
 
 /* ── "/" público: sin sesión → landing · con sesión → home del rol ── */
 function PublicHome() {
@@ -164,7 +163,7 @@ function useAuthBootstrap() {
 
 function AuthSplash() {
   return (
-    <div className="min-h-dvh grid place-items-center bg-bg">
+    <div className="min-h-dvh grid place-items-center bg-bg" role="status" aria-live="polite" aria-busy="true" aria-label="Cargando Altoque">
       <div className="flex flex-col items-center gap-4 animate-fadein">
         <span className="w-14 h-14 rounded-2xl bg-pine text-white grid place-items-center shadow-lift animate-pulse">
           <Icon name="bolt" className="w-7 h-7" strokeWidth={2} />
@@ -185,6 +184,7 @@ export default function App() {
       <ToastProvider>
         <AppErrorBoundary>
         <HashRouter>
+          <Suspense fallback={<AuthSplash />}>
           <Routes>
             {/* público */}
             <Route path="/" element={<PublicHome />} />
@@ -204,6 +204,7 @@ export default function App() {
 
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
+          </Suspense>
       </HashRouter>
       <Toast />
         </AppErrorBoundary>
