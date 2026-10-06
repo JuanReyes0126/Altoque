@@ -94,11 +94,30 @@ export function ResultsView({ catId, go }: { catId: string; go: (view: View) => 
   const [reload, setReload] = useState(0);
   useEffect(() => {
     let alive = true;
+    let clamped = false;
     setLoading(true); setError("");
     Promise.all([api.categories.list(), api.providersPublic.list({ category: catId, ...(available ? { available: true } : {}), page, limit: 20 })])
-      .then(([catalog, result]) => { if (alive) { setCategory(catalog.find((item) => item.id === catId)); setProviders(result.data); setPages(result.meta.pages); } })
+      .then(([catalog, result]) => {
+        if (!alive) return;
+        const meta = result?.meta;
+        if (!Array.isArray(result?.data) || !meta ||
+          ![meta.page, meta.limit, meta.pages, meta.total].every(Number.isSafeInteger) ||
+          meta.page !== page || meta.limit !== 20 || meta.total < 0 ||
+          meta.pages !== Math.max(1, Math.ceil(meta.total / 20)) ||
+          result.data.length > Math.max(0, Math.min(20, meta.total - (page - 1) * 20))) {
+          throw new Error("INVALID_PROVIDER_PAGE");
+        }
+        setCategory(catalog.find((item) => item.id === catId));
+        setPages(meta.pages);
+        if (page > meta.pages) {
+          clamped = true;
+          setPage(meta.pages);
+          return;
+        }
+        setProviders(result.data);
+      })
       .catch(() => { if (alive) setError("No pudimos cargar los profesionales."); })
-      .finally(() => { if (alive) setLoading(false); });
+      .finally(() => { if (alive && !clamped) setLoading(false); });
     return () => { alive = false; };
   }, [catId, available, page, reload]);
   return <main className="max-w-4xl mx-auto px-5 py-6">
@@ -107,6 +126,6 @@ export function ResultsView({ catId, go }: { catId: string; go: (view: View) => 
     <label className="flex gap-3 items-center mt-5 min-h-11"><input type="checkbox" checked={available} onChange={(event) => { setAvailable(event.target.checked); setPage(1); }} /> Solo disponibles</label>
     {!loading && !error && !category ? <p role="status" className="card p-6 mt-5">Esta categoría no existe o ya no está disponible.</p> : <CatalogState loading={loading} error={error} empty={providers.length === 0} onRetry={() => setReload((value) => value + 1)}><div className="grid sm:grid-cols-2 gap-4 mt-5">{providers.map((provider) => <PublicProviderCard key={provider.id} provider={provider} onOpen={() => go({ t: "pro", id: provider.id })} onRequest={() => go({ t: "request", catId, proId: provider.id })} />)}</div></CatalogState>}
     {!loading && !error && category && <button onClick={() => go({ t: "request", catId })} className="btn-pine h-12 px-5 mt-6">Crear solicitud en tu zona</button>}
-    {!loading && !error && pages > 1 && <nav aria-label="Páginas de profesionales" className="flex items-center gap-3 mt-5"><button disabled={page <= 1} onClick={() => setPage((value) => value - 1)} className="btn-ghost h-11 px-4">Anterior</button><span>{page} / {pages}</span><button disabled={page >= pages} onClick={() => setPage((value) => value + 1)} className="btn-ghost h-11 px-4">Siguiente</button></nav>}
+    {(pages > 1 || page > 1) && <nav aria-label="Páginas de profesionales" aria-busy={loading} className="flex items-center gap-3 mt-5"><button disabled={loading || page <= 1} onClick={() => setPage((value) => value - 1)} className="btn-ghost h-11 px-4">Anterior</button><span>{loading || error ? `Página ${page}` : `${page} / ${pages}`}</span><button disabled={loading || page >= pages} onClick={() => setPage((value) => value + 1)} className="btn-ghost h-11 px-4">Siguiente</button></nav>}
   </main>;
 }

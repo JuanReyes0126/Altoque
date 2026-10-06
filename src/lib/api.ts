@@ -140,7 +140,7 @@ export const api = {
       if (params?.page) query.set("page", String(params.page));
       if (params?.limit) query.set("limit", String(params.limit));
       const qs = query.toString();
-      const res = await http<{ data: PublicProvider[]; meta: { total: number; page: number; pages: number } }>(`/api/v1/providers${qs ? "?" + qs : ""}`);
+      const res = await http<{ data: PublicProvider[]; meta: { total: number; page: number; limit: number; pages: number } }>(`/api/v1/providers${qs ? "?" + qs : ""}`);
       return res;
     },
     getById: async (id: string) => {

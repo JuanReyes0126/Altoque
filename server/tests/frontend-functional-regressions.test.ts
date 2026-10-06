@@ -117,6 +117,74 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
+describe("directorio cliente: navegación y contratos reales de React", () => {
+  it("consulta la última página válida cuando el catálogo disminuye", async () => {
+    calls.directory.mockResolvedValueOnce(directoryPage(1, 21))
+      .mockResolvedValueOnce(directoryPage(2, 20))
+      .mockResolvedValueOnce(directoryPage(1, 20, "remaining-professional"));
+    const renderer = await mount(results());
+    await click(renderer, "Siguiente");
+
+    expect(calls.directory.mock.calls.map(([params]) => params.page)).toEqual([1, 2, 1]);
+    expect(calls.directory.mock.calls.every(([params]) => params.limit === 20)).toBe(true);
+    expect(screenText(renderer)).toContain("remaining-professional");
+    expect(screenText(renderer)).not.toContain("No hay resultados disponibles");
+  });
+
+  it("muestra carga, limita navegación y conserva el filtro", async () => {
+    const next = deferred<ReturnType<typeof directoryPage>>();
+    calls.directory.mockResolvedValueOnce(directoryPage(1, 21)).mockReturnValueOnce(next.promise);
+    const renderer = await mount(results());
+    expect(button(renderer, "Anterior").props.disabled).toBe(true);
+    await click(renderer, "Siguiente");
+    expect(screenText(renderer)).toContain("Cargando servicios");
+    expect(button(renderer, "Anterior").props.disabled).toBe(true);
+    expect(button(renderer, "Siguiente").props.disabled).toBe(true);
+    await act(async () => { next.resolve(directoryPage(2, 21)); });
+    expect(button(renderer, "Siguiente").props.disabled).toBe(true);
+    expect(button(renderer, "Anterior").props.disabled).toBe(false);
+    await click(renderer, "Anterior");
+    expect(calls.directory.mock.calls.map(([params]) => params.page)).toEqual([1, 2, 1]);
+  });
+
+  it("descarta la respuesta de una página anterior al cambiar disponibilidad", async () => {
+    const stale = deferred<ReturnType<typeof directoryPage>>();
+    calls.directory.mockResolvedValueOnce(directoryPage(1, 21))
+      .mockReturnValueOnce(stale.promise)
+      .mockResolvedValueOnce(directoryPage(1, 1, "filtered-professional"));
+    const renderer = await mount(results());
+    await click(renderer, "Siguiente");
+    await act(async () => {
+      renderer.root.findByType("input").props.onChange({ target: { checked: true } });
+    });
+    await act(async () => { stale.resolve(directoryPage(2, 21, "stale-professional")); });
+    expect(screenText(renderer)).toContain("filtered-professional");
+    expect(screenText(renderer)).not.toContain("stale-professional");
+    expect(calls.directory).toHaveBeenLastCalledWith({ category: category.id, available: true, page: 1, limit: 20 });
+  });
+
+  it.each([
+    { ...directoryPage(1, 1), meta: { page: 1, total: 1, pages: 0 } },
+    { ...directoryPage(1, 1), meta: { page: 2, total: 1, pages: 1 } },
+    { ...directoryPage(1, 1), meta: { page: 1, total: 1, pages: Number.NaN } },
+  ])("metadata inválida muestra error recuperable", async (response) => {
+    calls.directory.mockResolvedValueOnce(response).mockResolvedValueOnce(directoryPage(1, 1));
+    const renderer = await mount(results());
+    expect(screenText(renderer)).toContain("No pudimos cargar los profesionales");
+    expect(screenText(renderer)).not.toContain("No hay resultados disponibles");
+    await click(renderer, "Reintentar");
+    expect(screenText(renderer)).toContain("professional-page-1");
+  });
+
+  it("cero profesionales es vacío normal y conserva creación de solicitud", async () => {
+    calls.directory.mockResolvedValue(directoryPage(1, 0));
+    const renderer = await mount(results());
+    expect(screenText(renderer)).toContain("No hay resultados disponibles por ahora");
+    expect(screenText(renderer)).not.toContain("No pudimos cargar");
+    expect(button(renderer, "Crear solicitud en tu zona")).toBeDefined();
+  });
+});
+
 describe("AuthSheet: petición pendiente y accesibilidad sin cambiar el diseño", () => {
   it("registro pendiente impide cerrar, cambiar modo o editar sus credenciales", async () => {
     const pending = deferred<unknown>();
